@@ -2,14 +2,20 @@
 from __future__ import annotations
 
 import os
+import re
 
 from PySide6.QtCore import QAbstractTableModel, QModelIndex, QSortFilterProxyModel, Qt
+from PySide6.QtGui import QPalette
+from PySide6.QtWidgets import QStyledItemDelegate
+
+from engine.pipeline import norm_name
+from lang import T
 
 from . import theme
 from .compare_view import fmt_time
 
-COLUMNS = ["Band", "Titel A", "Titel B", "Album A", "Album B", "Art", "Gleich", "Länge A", "Länge B",
-           "Ordner A", "Ordner B"]
+COLUMNS = [T("Band"), T("Titel A"), T("Titel B"), T("Album A"), T("Album B"), T("Art"), T("Gleich"),
+           T("Länge A"), T("Länge B"), T("Ordner A"), T("Ordner B")]
 COL_BAND, COL_TA, COL_TB, COL_AA, COL_AB, COL_KIND, COL_SIM, COL_LA, COL_LB, COL_FA, COL_FB = range(11)
 SORT_ROLE = Qt.UserRole + 1
 PAIR_ROLE = Qt.UserRole + 2
@@ -17,6 +23,25 @@ PAIR_ROLE = Qt.UserRole + 2
 
 def _s(v) -> str:
     return (v or "").strip()
+
+
+def local_variant(v: str) -> str:
+    """Variantenname aus der Datenbank (deutsch, z. B. "Tonhöhe +1 HT") in der Oberflaechensprache."""
+    words = {"Geschwindigkeit": T("Geschwindigkeit"), "Tempo": T("Tempo"), "Tonhöhe": T("Tonhöhe"), "HT": T("HT")}
+    for de, local in words.items():
+        v = re.sub(rf"\b{de}\b", local, v)
+    return v
+
+
+def mismatch(a: dict, b: dict) -> tuple[bool, bool]:
+    """(Interpret weicht ab, Haupttitel weicht ab) -- Haupttitel ohne Klammerzusaetze wie (xyz-Mix),
+    beides ohne feat., Satzzeichen und Gross-/Kleinschreibung. Leere Angaben zaehlen nicht."""
+    def n(s, title=False):
+        s = norm_name((s or "").replace("ß", "ss"), title)
+        return s if title else re.sub(r"^(les|le|la|los|die|der|das)\s+", "", s)
+    ba, bb = n(a["artist"]), n(b["artist"])
+    ta, tb = n(a["title"], True), n(b["title"], True)
+    return bool(ba and bb and ba != bb), bool(ta and tb and ta != tb)
 
 
 class PairModel(QAbstractTableModel):
@@ -107,7 +132,7 @@ class PairModel(QAbstractTableModel):
             if c == COL_KIND:
                 text = theme.KIND_LABELS.get(p["kind"] if p["cmp_version"] else "", p["kind"])
                 if p["variant"] and p["kind"] == "variante":
-                    text += f" ({p['variant']})"
+                    text += f" ({local_variant(p['variant'])})"
                 return text
             if c == COL_SIM:
                 return "…" if p["similarity"] is None else f"{p['similarity']:.0f} %"
@@ -131,6 +156,11 @@ class PairModel(QAbstractTableModel):
                 return f"{(f['folder'] or '').lower()}\x00{(f['filename'] or '').lower()}"
             return (self.data(index, Qt.DisplayRole) or "").lower()
         if role == Qt.ToolTipRole:
+            if c == COL_BAND and mismatch(a, b)[0]:
+                return T("Interpret weicht ab:\nA: {a}\nB: {b}", a=_s(a["artist"]), b=_s(b["artist"]))
+            if c in (COL_TA, COL_TB) and mismatch(a, b)[1]:
+                return (T("Haupttitel weicht ab (ohne Klammerzusätze):\nA: {a}\nB: {b}", a=_s(a["title"]),
+                          b=_s(b["title"])) + "\n\n" + (a if c == COL_TA else b)["path"])
             if c in (COL_TA, COL_AA, COL_FA, COL_LA):
                 return a["path"]
             if c in (COL_TB, COL_AB, COL_FB, COL_LB):
@@ -138,8 +168,13 @@ class PairModel(QAbstractTableModel):
             if c == COL_KIND:
                 return theme.KIND_TIPS.get(p["kind"] if p["cmp_version"] else "", "")
             if c == COL_SIM and p["a_green"] is not None:
-                return (f"Gleich klingend: A zu {100 * p['a_green']:.0f} %, B zu {100 * p['b_green']:.0f} %"
-                        f"\nMedian-Übereinstimmung {p['sim_median']:.2f}")
+                return (T("Gleich klingend: A zu {a} %, B zu {b} %", a=f"{100 * p['a_green']:.0f}",
+                          b=f"{100 * p['b_green']:.0f}") + "\n"
+                        + T("Median-Übereinstimmung {m}", m=f"{p['sim_median']:.2f}"))
+        if role == Qt.ForegroundRole and c in (COL_BAND, COL_TA, COL_TB):
+            artist, title = mismatch(a, b)
+            if (c == COL_BAND and artist) or (c != COL_BAND and title):
+                return theme.MISMATCH_TEXT
         if role == Qt.ForegroundRole and c == COL_KIND:
             return theme.KIND_COLORS.get(p["kind"] if p["cmp_version"] else "", None)
         if role == Qt.TextAlignmentRole and c in (COL_SIM, COL_LA, COL_LB):
@@ -175,3 +210,16 @@ class PairFilter(QSortFilterProxyModel):
             if not all(word in hay for word in self.text.split()):
                 return False
         return True
+
+
+class MismatchDelegate(QStyledItemDelegate):
+    """Rote Schrift fuer abweichenden Interpret/Haupttitel auch in der markierten Zeile beibehalten
+    (Qt schreibt markierte Zeilen sonst immer in der Auswahl-Textfarbe)."""
+
+    def initStyleOption(self, option, index):
+        super().initStyleOption(option, index)
+        if index.column() in (COL_BAND, COL_TA, COL_TB) and index.data(Qt.ForegroundRole) == theme.MISMATCH_TEXT:
+            option.palette.setColor(QPalette.HighlightedText, theme.MISMATCH_TEXT)
+            f = option.font
+            f.setBold(True)
+            option.font = f

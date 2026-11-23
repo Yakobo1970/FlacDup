@@ -72,6 +72,14 @@ def run(audio: str, out: str) -> int:
         return tr.translate("QPlatformTheme", "Cancel") or "geladen"
     step("Deutsche Qt-Texte", translation)
 
+    def translations():
+        from lang_table import TABLE
+        missing = [k for k, v in TABLE.items() if not all(v)]
+        if missing:
+            raise RuntimeError(f"unvollständig: {missing[:3]}")
+        return f"{len(TABLE)} Texte EN/FR, z. B. {TABLE['Kein Duplikat'][0]!r} / {TABLE['Kein Duplikat'][1]!r}"
+    step("Übersetzungen", translations)
+
     def assets():
         from paths import ASSETS_DIR
         missing = [n for n in ("icon.ico", "editor_icon.ico", "logo.png") if not (ASSETS_DIR / n).exists()]
@@ -86,6 +94,7 @@ def run(audio: str, out: str) -> int:
         from pathlib import Path
         import gui.main_window as mw
         from gui.theme import apply_dark
+        os.environ.setdefault("FLACDUP_UPDATE_TEST", "0")   # keine Netzabfrage im Selbsttest
         work = Path(out).with_suffix("")
         work.mkdir(parents=True, exist_ok=True)
         mw.CONFIG_PATH = work / "config.json"

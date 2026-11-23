@@ -1,5 +1,7 @@
 from PySide6.QtGui import QColor, QPalette
 
+from lang import T
+
 # Rot/Gruen-Verlauf der Wellenformen (Aehnlichkeit je Fenster)
 SIM_RED = QColor(214, 64, 58)
 SIM_YELLOW = QColor(222, 190, 70)
@@ -8,24 +10,28 @@ NO_COUNTERPART = QColor(105, 108, 116)      # Stelle gibt es in der anderen Date
 PENDING_WAVE = QColor(120, 160, 190)        # Feinvergleich steht noch aus
 PLAYHEAD = QColor(255, 255, 255)
 ACTIVE_LANE = QColor(60, 110, 160, 70)
+MISMATCH_TEXT = QColor(255, 92, 80)        # Liste: Interpret oder Haupttitel weichen ab (Schriftfarbe)
+# "Gleich"-Farbe je Format: MP3 gruen (wie bisher), FLAC himmelblau, alle anderen pink
+SIM_GREEN_FLAC = QColor(92, 182, 236)
+SIM_GREEN_OTHER = QColor(232, 110, 190)
 
 KIND_LABELS = {
-    "identisch": "Identisch",
-    "ausschnitt": "Ausschnitt",
-    "variante": "Tempo/Tonhöhe",
-    "teilweise": "Gemeinsame Teile",
-    "version": "Andere Aufnahme",
-    "schwach": "Schwach",
-    "": "Noch nicht verglichen",
+    "identisch": T("Identisch"),
+    "ausschnitt": T("Ausschnitt"),
+    "variante": T("Tempo/Tonhöhe"),
+    "teilweise": T("Gemeinsame Teile"),
+    "version": T("Andere Aufnahme"),
+    "schwach": T("Schwach"),
+    "": T("Noch nicht verglichen"),
 }
 KIND_TIPS = {
-    "identisch": "Beide Dateien enthalten dieselbe Aufnahme fast vollständig",
-    "ausschnitt": "Eine Datei steckt (fast) vollständig in der anderen – z. B. Radio-Edit, gekürzte Fassung",
-    "variante": "Dieselbe Aufnahme schneller/langsamer oder in anderer Tonhöhe",
-    "teilweise": "Gemeinsame Abschnitte – z. B. Remix, Extended Mix, Medley",
-    "version": "Gleicher Song, aber andere Aufnahme (live, neu eingespielt, andere Sprache)",
-    "schwach": "Nur kurze oder überlagerte Gemeinsamkeiten – meist kein Duplikat",
-    "": "Der Feinvergleich (Phase 3) für dieses Paar läuft noch",
+    "identisch": T("Beide Dateien enthalten dieselbe Aufnahme fast vollständig"),
+    "ausschnitt": T("Eine Datei steckt (fast) vollständig in der anderen – z. B. Radio-Edit, gekürzte Fassung"),
+    "variante": T("Dieselbe Aufnahme schneller/langsamer oder in anderer Tonhöhe"),
+    "teilweise": T("Gemeinsame Abschnitte – z. B. Remix, Extended Mix, Medley"),
+    "version": T("Gleicher Song, aber andere Aufnahme (live, neu eingespielt, andere Sprache)"),
+    "schwach": T("Nur kurze oder überlagerte Gemeinsamkeiten – meist kein Duplikat"),
+    "": T("Der Feinvergleich (Phase 3) für dieses Paar läuft noch"),
 }
 KIND_COLORS = {
     "identisch": QColor(72, 186, 104),
@@ -38,17 +44,23 @@ KIND_COLORS = {
 }
 
 
-def sim_color(s: float) -> QColor:
-    """Aehnlichkeit -> Farbe: unter RED rot, ueber GREEN gruen, dazwischen ueber Gelb."""
+def same_color(ext: str) -> QColor:
+    """Farbe fuer 'klingt gleich' je Dateiformat."""
+    ext = (ext or "").lower().lstrip(".")
+    return SIM_GREEN if ext == "mp3" else SIM_GREEN_FLAC if ext == "flac" else SIM_GREEN_OTHER
+
+
+def sim_color(s: float, green: QColor = SIM_GREEN) -> QColor:
+    """Aehnlichkeit -> Farbe: unter RED rot, ueber GREEN 'gleich'-Farbe, dazwischen ueber Gelb."""
     from engine.compare import GREEN, RED
     if s != s:  # NaN
         return NO_COUNTERPART
     if s >= GREEN:
-        return SIM_GREEN
+        return green
     if s <= RED:
         return SIM_RED
     x = (s - RED) / (GREEN - RED)
-    a, b = (SIM_RED, SIM_YELLOW) if x < 0.5 else (SIM_YELLOW, SIM_GREEN)
+    a, b = (SIM_RED, SIM_YELLOW) if x < 0.5 else (SIM_YELLOW, green)
     f = x * 2 if x < 0.5 else (x - 0.5) * 2
     return QColor(int(a.red() + (b.red() - a.red()) * f), int(a.green() + (b.green() - a.green()) * f),
                   int(a.blue() + (b.blue() - a.blue()) * f))

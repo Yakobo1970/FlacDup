@@ -13,14 +13,16 @@ from pathlib import Path
 
 import soundfile as sf
 
+from lang import T
+
 LOSSLESS_EXT = {".flac", ".wav", ".aif", ".aiff"}
 COPY_EXT = {".mp3"}
 EDITABLE_EXT = LOSSLESS_EXT | COPY_EXT
 
 # Einfache Tag-Felder (mutagen-"easy"-Schluessel) mit Anzeigename
-TAG_FIELDS = [("title", "Titel"), ("artist", "Interpret"), ("album", "Album"),
-              ("albumartist", "Album-Interpret"), ("tracknumber", "Track"), ("date", "Jahr"),
-              ("genre", "Genre")]
+TAG_FIELDS = [("title", T("Titel")), ("artist", T("Interpret")), ("album", T("Album")),
+              ("albumartist", T("Album-Interpret")), ("tracknumber", T("Track")), ("date", T("Jahr")),
+              ("genre", T("Genre"))]
 
 MIN_PART_S = 0.05
 
@@ -124,7 +126,7 @@ def write_tags(path: str, overrides: dict[str, str]):
     from mutagen import File
     f = File(path, easy=True)
     if f is None:
-        raise EditError("Tags dieses Formats können nicht geschrieben werden")
+        raise EditError(T("Tags dieses Formats können nicht geschrieben werden"))
     if f.tags is None:
         f.add_tags()
     _apply(f, overrides)
@@ -147,10 +149,10 @@ def _apply(tagobj, overrides: dict[str, str]):
 def write_part(src: str, dst: str, ranges: list[tuple[float, float]], tags: dict[str, str]):
     """Ein Teilstueck (Bereiche aneinandergehaengt) verlustfrei nach dst schreiben."""
     if not ranges:
-        raise EditError("Teilstück ist leer")
+        raise EditError(T("Teilstück ist leer"))
     ext = Path(src).suffix.lower()
     if Path(dst).suffix.lower() != ext:
-        raise EditError("Die Dateiendung muss der des Originals entsprechen")
+        raise EditError(T("Die Dateiendung muss der des Originals entsprechen"))
     tmp = dst + ".flacdup.tmp" + ext
     try:
         if ext in LOSSLESS_EXT:
@@ -158,7 +160,7 @@ def write_part(src: str, dst: str, ranges: list[tuple[float, float]], tags: dict
         elif ext in COPY_EXT:
             _write_mp3_copy(src, tmp, ranges)
         else:
-            raise EditError(f"Format {ext} wird zum Bearbeiten nicht unterstützt")
+            raise EditError(T("Format {ext} wird zum Bearbeiten nicht unterstützt", ext=ext))
         copy_tags(src, tmp, tags)
         os.replace(tmp, dst)
     finally:

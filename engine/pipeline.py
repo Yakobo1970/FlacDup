@@ -25,6 +25,7 @@ from .decode import AUDIO_EXTENSIONS, probe
 from .fingerprint import FP_VERSION, fingerprint_file, unpack_peaks
 from .hashing import HashIndex, make_hashes, variant_grid
 from .tags import read_tags
+from lang import T
 
 MATCH_VERSION = 1
 MOVE_DURATION_TOL = 0.5
@@ -123,7 +124,7 @@ class Indexer:
         return moved
 
     def run(self):
-        self.on_status("Dateien werden gesammelt …")
+        self.on_status(T("Dateien werden gesammelt …"))
         files = self._gather()
         if self.stop.is_set():
             return
@@ -138,8 +139,8 @@ class Indexer:
                 if states[p][3] == "pending" or states[p][4] != FP_VERSION]
         todo.sort(key=str.lower)
         total, done = len(files), len(files) - len(todo)
-        extra = f" · {moved} verschobene Dateien wiedererkannt" if moved else ""
-        self.on_status(f"Index: {total} Audiodateien, davon {len(todo)} zu analysieren{extra}")
+        extra = " · " + T("{n} verschobene Dateien wiedererkannt", n=moved) if moved else ""
+        self.on_status(T("Index: {total} Audiodateien, davon {todo} zu analysieren", total=total, todo=len(todo)) + extra)
         self.on_progress(done, total)
         if not todo:
             return
@@ -175,15 +176,15 @@ class Indexer:
                 if finished:
                     rate = (done - n0) / max(1e-6, time.time() - t0)
                     left = (total - done) / rate if rate > 0 else 0
-                    self.on_status(f"Index: {done} von {total} Dateien · {rate:.1f}/s · "
-                                   f"noch ca. {_fmt_dur(left)}")
+                    self.on_status(T("Index: {done} von {total} Dateien", done=done, total=total)
+                                   + f" · {rate:.1f}/s · " + T("noch ca. {t}", t=_fmt_dur(left)))
                 if self.stop.is_set():
                     for fut in pending:
                         fut.cancel()
                     ex.shutdown(wait=False, cancel_futures=True)
-                    self.on_status("Index angehalten – beim nächsten Start geht es hier weiter")
+                    self.on_status(T("Index angehalten – beim nächsten Start geht es hier weiter"))
                     return
-        self.on_status(f"Index fertig: {total} Dateien")
+        self.on_status(T("Index fertig: {n} Dateien", n=total))
 
 
 def _fmt_dur(s: float) -> str:
@@ -234,7 +235,7 @@ class Matcher:
         self.stop = threading.Event()
 
     def run(self):
-        self.on_status("Abgleich: Fingerabdrücke werden geladen …")
+        self.on_status(T("Abgleich: Fingerabdrücke werden geladen …"))
         peaks: dict[int, tuple[np.ndarray, np.ndarray]] = {}
         parts = []
         todo = []
@@ -249,11 +250,11 @@ class Matcher:
                 todo.append(fid)
                 peaks[fid] = (t, f)
             if n % 2000 == 0:
-                self.on_status(f"Abgleich: {n} Fingerabdrücke geladen …")
+                self.on_status(T("Abgleich: {n} Fingerabdrücke geladen …", n=n))
         if not todo:
-            self.on_status("Abgleich: nichts zu tun – alle Dateien sind abgeglichen")
+            self.on_status(T("Abgleich: nichts zu tun – alle Dateien sind abgeglichen"))
             return
-        self.on_status(f"Abgleich: Index aus {len(parts)} Dateien wird aufgebaut …")
+        self.on_status(T("Abgleich: Index aus {n} Dateien wird aufgebaut …", n=len(parts)))
         index = HashIndex.build(parts)
         durs = {r[0]: r[1] for r in self.db.conn.execute("SELECT id, duration FROM files WHERE status='done'")}
         del parts
@@ -267,7 +268,7 @@ class Matcher:
         t0 = time.time()
         for n, q in enumerate(todo):
             if self.stop.is_set():
-                self.on_status("Abgleich angehalten – beim nächsten Start geht es hier weiter")
+                self.on_status(T("Abgleich angehalten – beim nächsten Start geht es hier weiter"))
                 return
             t, f = peaks.pop(q)
             best: dict[int, matcher.Match] = {}
@@ -284,9 +285,9 @@ class Matcher:
             if n % 20 == 0 or n == len(todo) - 1:
                 self.on_progress(base + n + 1, total)
                 rate = (n + 1) / max(1e-6, time.time() - t0)
-                self.on_status(f"Abgleich: {base + n + 1} von {total} Dateien · "
-                               f"noch ca. {_fmt_dur((len(todo) - n - 1) / rate)}")
-        self.on_status(f"Abgleich fertig: {total} Dateien abgeglichen")
+                self.on_status(T("Abgleich: {done} von {total} Dateien", done=base + n + 1, total=total) + " · "
+                               + T("noch ca. {t}", t=_fmt_dur((len(todo) - n - 1) / rate)))
+        self.on_status(T("Abgleich fertig: {n} Dateien abgeglichen", n=total))
 
 
 # ---------------------------------------------------------------- Phase 3: Feinvergleich
@@ -374,18 +375,18 @@ class Comparer:
 
     def run(self):
         if self.titles:
-            self.on_status("Feinvergleich: Titel gleicher Bands werden gesucht …")
+            self.on_status(T("Feinvergleich: Titel gleicher Bands werden gesucht …"))
             new = title_candidates(self.db)
             if new:
                 self.db.add_title_pairs(new)
         jobs = self.db.pairs_to_compare(compare_mod.COMPARE_VERSION)
         if not jobs:
-            self.on_status("Feinvergleich: nichts zu tun")
+            self.on_status(T("Feinvergleich: nichts zu tun"))
             return
         # Fortschritt ueber alle Paare: bereits verglichene zaehlen mit
         total = max(len(jobs), self.db.conn.execute("SELECT COUNT(*) FROM pairs").fetchone()[0])
         done = base = total - len(jobs)
-        self.on_status(f"Feinvergleich: {len(jobs)} von {total} Paaren offen")
+        self.on_status(T("Feinvergleich: {n} von {total} Paaren offen", n=len(jobs), total=total))
         self.on_progress(done, total)
         t0 = time.time()
         with ProcessPoolExecutor(max_workers=self.workers) as ex:
@@ -418,12 +419,35 @@ class Comparer:
                 if finished:
                     self.on_progress(done, total)
                     rate = (done - base) / max(1e-6, time.time() - t0)
-                    self.on_status(f"Feinvergleich: {done} von {total} Paaren · "
-                                   f"noch ca. {_fmt_dur((total - done) / max(rate, 1e-6))}")
+                    self.on_status(T("Feinvergleich: {done} von {total} Paaren", done=done, total=total) + " · "
+                                   + T("noch ca. {t}", t=_fmt_dur((total - done) / max(rate, 1e-6))))
                 if self.stop.is_set():
                     for fut in pending:
                         fut.cancel()
                     ex.shutdown(wait=False, cancel_futures=True)
-                    self.on_status("Feinvergleich angehalten – beim nächsten Start geht es hier weiter")
+                    self.on_status(T("Feinvergleich angehalten – beim nächsten Start geht es hier weiter"))
                     return
-        self.on_status(f"Feinvergleich fertig: {total} Paare")
+        self.on_status(T("Feinvergleich fertig: {n} Paare", n=total))
+
+
+def reevaluate(db: Database, paths: list[str], partner_id: int | None) -> list[tuple[int, float]]:
+    """Sofort-Neubewertung nach dem Editor: Fingerabdruck der neuen Dateien und Feinvergleich mit
+    dem Partner des bearbeiteten Paares. Liefert (Paar-id, Uebereinstimmung) je neuem Paar. Der
+    Abgleich mit dem uebrigen Archiv folgt beim naechsten Lauf (match_version bleibt leer)."""
+    partner = None
+    if partner_id is not None:
+        row = db.conn.execute("SELECT path, status FROM files WHERE id=?", (partner_id,)).fetchone()
+        if row and row[1] == "done" and os.path.exists(row[0]):
+            partner = row[0]
+    out = []
+    for path in paths:
+        res, tags = index_worker(path)
+        fid = db.store_fingerprint(res, FP_VERSION, tags)
+        if fid is None or not res.get("ok") or partner is None:
+            continue
+        pid = db.add_edit_pair(fid, partner_id)
+        pa, pb = (path, partner) if fid < partner_id else (partner, path)
+        r = compare_mod.compare_pair(pa, pb, 1.0, None, 0.0)
+        db.store_compare(pid, classify_compare(r, ""), r, compare_mod.pack(r), compare_mod.COMPARE_VERSION)
+        out.append((pid, r["similarity"]))
+    return out

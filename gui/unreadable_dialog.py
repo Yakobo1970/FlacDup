@@ -9,13 +9,15 @@ from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (QAbstractItemView, QDialog, QHBoxLayout, QHeaderView, QLabel, QPushButton,
                                QTableWidget, QTableWidgetItem, QVBoxLayout)
 
+from lang import T
+
 
 class UnreadableDialog(QDialog):
     def __init__(self, db, parent=None):
         super().__init__(parent)
         self.db = db
         self.retried = 0
-        self.setWindowTitle("Nicht lesbare Dateien")
+        self.setWindowTitle(T("Nicht lesbare Dateien"))
         self.resize(1100, 420)
         lay = QVBoxLayout(self)
         self.info = QLabel()
@@ -23,7 +25,7 @@ class UnreadableDialog(QDialog):
         lay.addWidget(self.info)
 
         self.table = QTableWidget(0, 3, self)
-        self.table.setHorizontalHeaderLabels(["Datei", "Ordner", "Grund"])
+        self.table.setHorizontalHeaderLabels([T("Datei"), T("Ordner"), T("Grund")])
         self.table.verticalHeader().setVisible(False)
         self.table.setEditTriggers(QAbstractItemView.NoEditTriggers)
         self.table.setSelectionBehavior(QAbstractItemView.SelectRows)
@@ -37,14 +39,13 @@ class UnreadableDialog(QDialog):
         lay.addWidget(self.table, 1)
 
         bar = QHBoxLayout()
-        self.b_explorer = QPushButton("Im Explorer zeigen")
-        self.b_explorer.setToolTip("Öffnet den Ordner und markiert die Datei (auch per Doppelklick)")
+        self.b_explorer = QPushButton(T("Im Explorer zeigen"))
+        self.b_explorer.setToolTip(T("Öffnet den Ordner und markiert die Datei (auch per Doppelklick)"))
         self.b_explorer.clicked.connect(self._explorer)
-        self.b_retry = QPushButton("Erneut einlesen")
-        self.b_retry.setToolTip("Gewählte Dateien beim nächsten „Analyse fortsetzen“ "
-                                "noch einmal analysieren")
+        self.b_retry = QPushButton(T("Erneut einlesen"))
+        self.b_retry.setToolTip(T("Gewählte Dateien beim nächsten „Analyse fortsetzen“ noch einmal analysieren"))
         self.b_retry.clicked.connect(self._retry)
-        close = QPushButton("Schließen")
+        close = QPushButton(T("Schließen"))
         close.setDefault(True)
         close.clicked.connect(self.accept)
         bar.addWidget(self.b_explorer)
@@ -64,8 +65,8 @@ class UnreadableDialog(QDialog):
                 item.setToolTip(path if c < 2 else text)
                 item.setData(Qt.UserRole, (fid, path))
                 self.table.setItem(r, c, item)
-        self.info.setText(f"{len(rows)} Datei(en) ließen sich nicht lesen und fehlen deshalb im Abgleich."
-                          if rows else "Alle Dateien ließen sich lesen.")
+        self.info.setText(T("{n} Datei(en) ließen sich nicht lesen und fehlen deshalb im Abgleich.", n=len(rows))
+                          if rows else T("Alle Dateien ließen sich lesen."))
         self.b_explorer.setEnabled(bool(rows))
         self.b_retry.setEnabled(bool(rows))
         if rows:
@@ -89,5 +90,6 @@ class UnreadableDialog(QDialog):
         self.db.retry(ids)
         self.retried += len(ids)
         self._fill()
-        self.info.setText(f"{len(ids)} Datei(en) werden beim nächsten „Analyse fortsetzen“ erneut eingelesen."
-                          + (f" Noch {self.table.rowCount()} weitere nicht lesbar." if self.table.rowCount() else ""))
+        self.info.setText(T("{n} Datei(en) werden beim nächsten „Analyse fortsetzen“ erneut eingelesen.", n=len(ids))
+                          + (" " + T("Noch {n} weitere nicht lesbar.", n=self.table.rowCount())
+                             if self.table.rowCount() else ""))

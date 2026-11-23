@@ -13,6 +13,8 @@ import numpy as np
 import sounddevice as sd
 from PySide6.QtCore import QObject, QTimer, Signal
 
+from lang import T
+
 from engine.decode import read_segment
 
 CHUNK_S = 20.0      # Nachladeblock beim Abspielen bis zum Ende
@@ -90,17 +92,17 @@ class LoopPlayer(QObject):
         else:
             pieces = _pieces(ranges if ranges is not None else [(t0, t1)])
             if not pieces:
-                self.error.emit("Ausschnitt ist leer")
+                self.error.emit(T("Ausschnitt ist leer"))
                 return
             t0 = pieces[0][0]
         first_end = pieces[0][1]
         try:
             data, sr = read_segment(path, t0, first_end)
         except Exception as exc:
-            self.error.emit(f"Ausschnitt nicht lesbar: {exc}")
+            self.error.emit(T("Ausschnitt nicht lesbar: {err}", err=exc))
             return
         if data.shape[0] == 0:
-            self.error.emit("Ausschnitt ist leer")
+            self.error.emit(T("Ausschnitt ist leer"))
             return
         data = data[:, :2]
         if not loop:
@@ -141,7 +143,7 @@ class LoopPlayer(QObject):
             except Exception as exc:
                 last = exc
         self._stream = None
-        self.error.emit(f"Audioausgabe nicht möglich: {last}")
+        self.error.emit(T("Audioausgabe nicht möglich: {err}", err=last))
         return False
 
     def _convert(self, data: np.ndarray) -> np.ndarray:

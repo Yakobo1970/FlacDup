@@ -4,28 +4,33 @@ import datetime as _dt
 import json
 import os
 import re
+import shutil
 import subprocess
 import threading
 from pathlib import Path
 
 from PySide6.QtCore import QObject, Qt, QTimer, Signal
 from PySide6.QtGui import QAction, QKeySequence, QShortcut
-from PySide6.QtWidgets import (QAbstractItemView, QCheckBox, QComboBox, QFileDialog, QHBoxLayout,
+from PySide6.QtWidgets import (QAbstractItemView, QCheckBox, QComboBox, QFileDialog, QGridLayout, QHBoxLayout,
                                QHeaderView, QLabel, QLineEdit, QMainWindow, QMessageBox, QProgressBar,
-                               QPushButton, QSplitter, QTableView, QVBoxLayout, QWidget)
+                               QPushButton, QSizePolicy, QSplitter, QTableView, QVBoxLayout, QWidget)
 from send2trash import send2trash
 
-from engine import compare
+from engine import compare, editing, recycle
+from engine.cover import cover_bytes
 from engine.db import Database
 from engine.decode import AUDIO_EXTENSIONS, probe
-from engine.pipeline import Comparer, Indexer, Matcher, classify_compare, default_workers
+from engine.pipeline import Comparer, Indexer, Matcher, classify_compare, default_workers, reevaluate
+from engine.tags import read_tags
+from lang import LANG, LANGS, T, set_language
 from version import APP_NAME, VERSION
 
 from . import theme
 from .ab_player import ABPlayer
 from .check_combo import CheckCombo
 from .compare_view import CompareView, fmt_time
-from .pair_model import COL_BAND, PAIR_ROLE, PairFilter, PairModel
+from .pair_model import COL_BAND, PAIR_ROLE, MismatchDelegate, PairFilter, PairModel
+from .widgets import BLUE_BUTTON, GREEN_BUTTON, TrashButton
 
 APP_DATA_DIR = Path(os.environ.get("LOCALAPPDATA", Path.home())) / APP_NAME
 ERROR_LOG = APP_DATA_DIR / "fehler.log"
@@ -34,7 +39,14 @@ CONFIG_PATH = APP_DATA_DIR / "config.json"
 
 KIND_ORDER = ["identisch", "ausschnitt", "variante", "teilweise", "version", "schwach", ""]
 DEFAULT_KINDS_OFF = {"schwach"}
-REVIEW_CHOICES = [("Offen", "open"), ("Kein Duplikat", "not_dup"), ("Erledigt", "done"), ("Alle", "all")]
+REVIEW_CHOICES = [(T("Offen"), "open"), (T("Kein Duplikat"), "not_dup"), (T("Alle"), "all")]
+UNDO_LIMIT = 50
+# Spalten der Dateiinfo ueber der Welle
+# Spalten der Dateiinfo: Seite, Ordner, Dateiname, Dateien im Ordner, Länge, Abtastrate, Bitrate, Packrate,
+# Kanäle, gleich klingend -- Ordner und Dateiname links, die Zahlen rechtsbuendig
+INFO_COLS = 10
+INFO_LEFT = (0, 1, 2)
+PHASES = {"p1": T("Phase 1 von 3: Index"), "p2": T("Phase 2 von 3: Abgleich"), "p3": T("Phase 3 von 3: Feinvergleich")}
 
 
 def log_error(where: str, exc: BaseException):
@@ -47,6 +59,25 @@ def log_error(where: str, exc: BaseException):
             fh.write("".join(traceback.format_exception(type(exc), exc, exc.__traceback__)))
     except Exception:
         pass
+
+
+def move_file(src: str, dst: str):
+    """Datei verschieben/umbenennen; kurz erneut versuchen, falls Windows sie noch gesperrt haelt
+    (Virenscanner, Vorschau). Auf demselben Laufwerk nie Kopieren+Loeschen: das liesse bei einer
+    Sperre zwei Dateien zurueck."""
+    import time
+    same = os.path.normcase(os.path.abspath(dst)) == os.path.normcase(os.path.abspath(src))
+    if os.path.exists(dst) and not same:
+        raise FileExistsError(T("Am Ziel liegt schon eine Datei:\n{path}", path=dst))
+    one_drive = os.path.splitdrive(os.path.abspath(src))[0].lower() == os.path.splitdrive(os.path.abspath(dst))[0].lower()
+    for attempt in range(20):
+        try:
+            os.replace(src, dst) if one_drive else shutil.move(src, dst)
+            return
+        except PermissionError:
+            if attempt == 19:
+                raise
+            time.sleep(0.25)
 
 
 def _read_config() -> dict:
@@ -71,6 +102,7 @@ class Bridge(QObject):
     phase = Signal(str)
     finished = Signal(str)
     compared = Signal(int, object)     # pair_id, Ergebnis (oder None)
+    reevaluated = Signal(object, object)   # Kontext des Editors, [(Paar-id, Uebereinstimmung)]
 
 
 class MainWindow(QMainWindow):
@@ -87,10 +119,14 @@ class MainWindow(QMainWindow):
         self.bridge.phase.connect(self._on_phase)
         self.bridge.finished.connect(self._on_finished)
         self.bridge.compared.connect(self._on_compared)
+        self.bridge.reevaluated.connect(self._on_reevaluated)
         self.worker: threading.Thread | None = None
         self.job = None
         self.current: dict | None = None
         self._computing: set[int] = set()
+        self._undo: list[tuple[str, object]] = []    # (Beschreibung, Funktion) -- Strg+Z
+        self._reeval_busy = False
+        self._covers: dict[str, bytes | None] = {}   # Pfad -> Coverbild
         self._pack_cache: dict = {}        # (Pfad, Groesse) -> Packrate-Text
         self._cur_cmp = False              # Rot/Gruen des aktuellen Paares liegt vor
         # Funde aus Phase 2/3 laufend in die Liste holen (jedes Paar ist sofort gespeichert)
@@ -100,14 +136,19 @@ class MainWindow(QMainWindow):
 
         self.player = ABPlayer(self)
         self.player.loaded.connect(self._on_loaded)
-        self.player.load_failed.connect(lambda pid, msg: self.view.clear(f"Datei nicht lesbar: {msg}"))
+        self.player.load_failed.connect(lambda pid, msg: self.view.clear(T("Datei nicht lesbar: {err}", err=msg)))
         self.player.position_changed.connect(self._on_position)
         self.player.state_changed.connect(self._on_play_state)
         self.player.side_changed.connect(self._on_side)
         self.player.error.connect(lambda m: QMessageBox.warning(self, APP_NAME, m))
 
+        from .update_check import UpdateChecker
+        self.updates = UpdateChecker(_read_config, _write_config, self)
+        self.updates.found.connect(self._on_update_found)
+        self._new_version = ""
         self._build_ui()
         self._build_menu()
+        QTimer.singleShot(3000, self.updates.start)
         self._shortcuts()
         self.setAcceptDrops(True)
         self.reload()
@@ -119,49 +160,56 @@ class MainWindow(QMainWindow):
         lay.setContentsMargins(8, 8, 8, 8)
 
         top = QHBoxLayout()
-        self.btn_add = QPushButton("Ordner hinzufügen …")
-        self.btn_add.setToolTip("Ordner wählen und analysieren (auch per Drag & Drop ins Fenster)")
+        self.btn_add = QPushButton(T("Ordner hinzufügen …"))
+        self.btn_add.setToolTip(T("Ordner wählen und analysieren (auch per Drag & Drop ins Fenster)"))
         self.btn_add.clicked.connect(self._add_folder)
-        self.btn_run = QPushButton("▶  Analyse fortsetzen")
-        self.btn_run.setToolTip("Alle bekannten Ordner aktualisieren und die drei Phasen abarbeiten:\n"
-                                "1 Index (Fingerabdruck je Datei) · 2 Abgleich · 3 Feinvergleich.\n"
-                                "Nach einem Abbruch oder Absturz geht es dort weiter, wo es aufgehört hat.")
+        self.btn_run = QPushButton("▶  " + T("Analyse fortsetzen"))
+        self.btn_run.setToolTip(T("Alle bekannten Ordner aktualisieren und die drei Phasen abarbeiten:\n"
+                                  "1 Index (Fingerabdruck je Datei) · 2 Abgleich · 3 Feinvergleich.\n"
+                                  "Nach einem Abbruch oder Absturz geht es dort weiter, wo es aufgehört hat."))
         self.btn_run.clicked.connect(lambda: self._start_job(self.db.roots()))
-        self.btn_stop = QPushButton("■  Anhalten")
+        self.btn_stop = QPushButton("■  " + T("Anhalten"))
         self.btn_stop.setEnabled(False)
         self.btn_stop.clicked.connect(self._stop_job)
-        self.chk_var = QCheckBox("Tempo/Tonhöhe")
-        self.chk_var.setToolTip("Auch schneller/langsamer abgespielte und in der Tonhöhe verschobene Fassungen "
-                                "suchen (±10 %).\nDer Abgleich dauert damit etwa 20-mal so lange.")
+        self.chk_var = QCheckBox(T("Tempo/Tonhöhe"))
+        self.chk_var.setToolTip(T("Auch schneller/langsamer abgespielte und in der Tonhöhe verschobene Fassungen "
+                                  "suchen (±10 %).\nDer Abgleich dauert damit etwa 20-mal so lange."))
         self.chk_var.setChecked(self.db.get_setting("variants", "1") == "1")
         self.chk_var.toggled.connect(lambda on: self.db.set_setting("variants", "1" if on else "0"))
-        self.chk_titles = QCheckBox("Gleiche Titel")
-        self.chk_titles.setToolTip("Dateien gleicher Band mit gleichem Titel zusätzlich direkt vergleichen.\n"
-                                   "Findet andere Aufnahmen (live, neu eingespielt) und alte Aufnahmen,\n"
-                                   "deren Klangschlüssel nicht greifen.")
+        self.chk_titles = QCheckBox(T("Gleiche Titel"))
+        self.chk_titles.setToolTip(T("Dateien gleicher Band mit gleichem Titel zusätzlich direkt vergleichen.\n"
+                                     "Findet andere Aufnahmen (live, neu eingespielt) und alte Aufnahmen,\n"
+                                     "deren Klangschlüssel nicht greifen."))
         self.chk_titles.setChecked(self.db.get_setting("titles", "1") == "1")
         self.chk_titles.toggled.connect(lambda on: self.db.set_setting("titles", "1" if on else "0"))
         self.progress = QProgressBar()
         self.progress.setMaximumWidth(260)
         self.progress.setTextVisible(True)
         self.lbl_status = QLabel("")
+        # gruener Knopf, sobald es eine neuere Version gibt (Update-Pruefung)
+        self.btn_update = QPushButton("")
+        self.btn_update.setStyleSheet("QPushButton { background: #2f7d46; color: white; font-weight: bold; "
+                                      "padding: 3px 10px; }")
+        self.btn_update.setVisible(False)
+        self.btn_update.clicked.connect(self._update_menu)
         for w in (self.btn_add, self.btn_run, self.btn_stop, self.chk_var, self.chk_titles):
             top.addWidget(w)
         top.addSpacing(12)
         top.addWidget(self.progress)
         top.addWidget(self.lbl_status, 1)
+        top.addWidget(self.btn_update)
         lay.addLayout(top)
 
         filt = QHBoxLayout()
         self.search = QLineEdit()
-        self.search.setPlaceholderText("Suchen (Band, Titel, Album, Pfad) …")
+        self.search.setPlaceholderText(T("Suchen (Band, Titel, Album, Pfad) …"))
         self.search.setClearButtonEnabled(True)
         self.search.textChanged.connect(lambda: self._filter_timer.start())
         self._filter_timer = QTimer(self)
         self._filter_timer.setSingleShot(True)
         self._filter_timer.setInterval(250)
         self._filter_timer.timeout.connect(self._apply_filter)
-        self.kind_combo = CheckCombo("Alle Arten", "Arten")
+        self.kind_combo = CheckCombo(T("Alle Arten"), T("Arten"))
         self.kind_combo.set_items([(theme.KIND_LABELS[k], k) for k in KIND_ORDER],
                                   set(KIND_ORDER) - self._kinds_off())
         self.kind_combo.selection_changed.connect(self._on_kinds_changed)
@@ -171,9 +219,9 @@ class MainWindow(QMainWindow):
         self.review_combo.currentIndexChanged.connect(self._apply_filter)
         self.lbl_count = QLabel("")
         filt.addWidget(self.search, 2)
-        filt.addWidget(QLabel("Art:"))
+        filt.addWidget(QLabel(T("Art:")))
         filt.addWidget(self.kind_combo)
-        filt.addWidget(QLabel("Status:"))
+        filt.addWidget(QLabel(T("Status:")))
         filt.addWidget(self.review_combo)
         filt.addWidget(self.lbl_count, 1)
         lay.addLayout(filt)
@@ -183,6 +231,7 @@ class MainWindow(QMainWindow):
         self.proxy.setSourceModel(self.model)
         self.table = QTableView()
         self.table.setModel(self.proxy)
+        self.table.setItemDelegate(MismatchDelegate(self.table))
         self.table.setSortingEnabled(True)
         self.table.setSelectionBehavior(QAbstractItemView.SelectRows)
         self.table.setSelectionMode(QAbstractItemView.SingleSelection)
@@ -200,65 +249,108 @@ class MainWindow(QMainWindow):
         detail = QWidget()
         dl = QVBoxLayout(detail)
         dl.setContentsMargins(0, 4, 0, 0)
-        self.lbl_a = QLabel("")
-        self.lbl_b = QLabel("")
-        for lbl in (self.lbl_a, self.lbl_b):
-            lbl.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        # Dateiinfo A/B als Tabelle: gleiche Angaben stehen untereinander
+        info = QGridLayout()
+        info.setHorizontalSpacing(14)
+        info.setVerticalSpacing(2)
+        self.info_cells: list[list[QLabel]] = []
+        for r, side in enumerate("AB"):
+            row = []
+            for c in range(INFO_COLS):
+                lbl = QLabel("")
+                lbl.setTextInteractionFlags(Qt.TextSelectableByMouse)
+                if c == 0:
+                    lbl.setText(f"<b>{side}</b>")
+                if c in (1, 2):     # lange Pfade/Namen duerfen abgeschnitten werden, voller Text im Tooltip
+                    lbl.setMinimumWidth(40)
+                    lbl.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
+                info.addWidget(lbl, r, c, Qt.AlignLeft if c in INFO_LEFT else Qt.AlignRight)
+                row.append(lbl)
+            self.info_cells.append(row)
+        info.setColumnStretch(1, 3)
+        info.setColumnStretch(2, 2)
+        dl.addLayout(info)
+
+        # Links neben der Welle: rote Papierkorb-Symbole auf Hoehe von A und B, darunter gross und blau
+        # "Kein Duplikat"; rechts daneben, direkt unter der Welle, Play/Pause, A/B und die Ordner.
         self.view = CompareView()
         self.view.seek_requested.connect(self._seek)
         self.view.edit_requested.connect(self._open_editor)
-        dl.addWidget(self.lbl_a)
-        dl.addWidget(self.lbl_b)
-        dl.addWidget(self.view, 1)
+        self.btn_trash_a = TrashButton()
+        self.btn_trash_b = TrashButton()
+        for side, btn in enumerate((self.btn_trash_a, self.btn_trash_b)):
+            btn.setToolTip(T("Datei {side} in den Windows-Papierkorb legen (Strg+Z holt sie zurück)", side="AB"[side]))
+            btn.clicked.connect(lambda _=False, s=side: self._trash(s))
+            btn.hovered.connect(lambda on, s=side: self.view.set_trash_hint(s if on else None))
+        self.btn_notdup = QPushButton(T("Kein Duplikat"))
+        self.btn_notdup.setToolTip(T("Beide Dateien behalten – das Paar verschwindet aus der Liste „Offen“ "
+                                     "und taucht nicht wieder auf (Taste N, Strg+Z macht es rückgängig)"))
+        self.btn_notdup.clicked.connect(lambda: self._set_review("not_dup"))
+        self.btn_reopen = QPushButton(T("Wieder in die Liste"))
+        self.btn_reopen.setToolTip(T("Dieses Paar war als „Kein Duplikat“ markiert – zurück in die Liste „Offen“ holen"))
+        self.btn_reopen.clicked.connect(lambda: self._set_review("open"))
+        for btn in (self.btn_notdup, self.btn_reopen):
+            btn.setMinimumHeight(66)
+            btn.setStyleSheet(BLUE_BUTTON)
+        side_w = max(118, max(b.sizeHint().width() for b in (self.btn_notdup, self.btn_reopen)) + 16)
+        side_col = QVBoxLayout()
+        side_col.setContentsMargins(0, 0, 0, 0)
+        side_col.addStretch(1)
+        side_col.addWidget(self.btn_trash_a, 0, Qt.AlignHCenter)
+        side_col.addStretch(2)
+        side_col.addWidget(self.btn_trash_b, 0, Qt.AlignHCenter)
+        side_col.addStretch(1)
 
-        tr = QHBoxLayout()
-        self.btn_play = QPushButton("▶  Abspielen")
-        self.btn_play.setToolTip("Leertaste")
+        self.btn_play = QPushButton("▶  " + T("Abspielen"))
+        self.btn_play.setToolTip(T("Abspielen / Pause (Leertaste)"))
         self.btn_play.clicked.connect(self.player.toggle)
+        self.btn_play.setMinimumSize(150, 66)
+        self.btn_play.setStyleSheet(GREEN_BUTTON)
         self.btn_a = QPushButton("A")
         self.btn_b = QPushButton("B")
         for k, btn in enumerate((self.btn_a, self.btn_b)):
             btn.setCheckable(True)
-            btn.setMinimumWidth(56)
             btn.setStyleSheet("QPushButton:checked { background: #3c6ea0; font-weight: bold; }")
             btn.clicked.connect(lambda _=False, s=k: self._choose_side(s))
-        self.btn_a.setToolTip("Taste A – an der entsprechenden Stelle auf A umschalten")
-        self.btn_b.setToolTip("Taste B – an der entsprechenden Stelle auf B umschalten")
-        self.lbl_pos = QLabel("")
-        self.lbl_pos.setMinimumWidth(260)
-        hint = QLabel("Leertaste = Abspielen/Pause · Tab = A/B umschalten · Klick in eine Welle = dorthin springen · "
-                      "Mausrad = Zoom · Doppelklick = alles · Rechtsklick = bearbeiten")
-        hint.setStyleSheet("color: #8a8a8a;")
-        tr.addWidget(self.btn_play)
-        tr.addWidget(self.btn_a)
-        tr.addWidget(self.btn_b)
-        tr.addWidget(self.lbl_pos)
-        tr.addWidget(hint, 1)
-        dl.addLayout(tr)
-
-        act = QHBoxLayout()
-        self.btn_trash_a = QPushButton("A in den Papierkorb")
-        self.btn_trash_b = QPushButton("B in den Papierkorb")
-        self.btn_trash_a.clicked.connect(lambda: self._trash(0))
-        self.btn_trash_b.clicked.connect(lambda: self._trash(1))
-        self.btn_dir_a = QPushButton("Ordner von A")
-        self.btn_dir_b = QPushButton("Ordner von B")
+        for s, btn in (("A", self.btn_a), ("B", self.btn_b)):
+            btn.setToolTip(T("Taste {side} – an der entsprechenden Stelle auf {side} umschalten (Tab wechselt)", side=s))
+        self.btn_dir_a = QPushButton(T("Ordner von {side}", side="A"))
+        self.btn_dir_b = QPushButton(T("Ordner von {side}", side="B"))
+        self.btn_dir_a.setToolTip(T("Ordner von {side} im Explorer öffnen, die Datei ist markiert", side="A"))
+        self.btn_dir_b.setToolTip(T("Ordner von {side} im Explorer öffnen, die Datei ist markiert", side="B"))
         self.btn_dir_a.clicked.connect(lambda: self._open_dir(0))
         self.btn_dir_b.clicked.connect(lambda: self._open_dir(1))
-        self.btn_notdup = QPushButton("Kein Duplikat")
-        self.btn_notdup.setToolTip("Paar dauerhaft als „kein Duplikat“ markieren (Taste N)")
-        self.btn_notdup.clicked.connect(lambda: self._set_review("not_dup"))
-        self.btn_done = QPushButton("Erledigt")
-        self.btn_done.setToolTip("Paar als bearbeitet markieren – beide Dateien bleiben (Taste E)")
-        self.btn_done.clicked.connect(lambda: self._set_review("done"))
-        self.btn_reopen = QPushButton("Wieder öffnen")
-        self.btn_reopen.clicked.connect(lambda: self._set_review("open"))
-        for w in (self.btn_trash_a, self.btn_dir_a, self.btn_trash_b, self.btn_dir_b):
-            act.addWidget(w)
-        act.addStretch(1)
-        for w in (self.btn_reopen, self.btn_notdup, self.btn_done):
-            act.addWidget(w)
-        dl.addLayout(act)
+        self.lbl_pos = QLabel("")
+        self.lbl_pos.setMinimumWidth(260)
+        hint = QLabel(T("Leertaste = Abspielen/Pause · Tab = A/B umschalten · Klick in die Welle = springen · "
+                        "Mausrad = Zoom · Doppelklick = alles · Rechtsklick = bearbeiten · Strg+Z = rückgängig"))
+        hint.setStyleSheet("color: #8a8a8a;")
+        hint.setWordWrap(True)
+        transport = QGridLayout()
+        transport.setHorizontalSpacing(6)
+        transport.addWidget(self.btn_play, 0, 0, 2, 1)
+        transport.addWidget(self.btn_a, 0, 1)
+        transport.addWidget(self.btn_b, 0, 2)
+        transport.addWidget(self.btn_dir_a, 1, 1)
+        transport.addWidget(self.btn_dir_b, 1, 2)
+        transport.addWidget(self.lbl_pos, 0, 3)
+        transport.addWidget(hint, 0, 4, 2, 1)
+        transport.setColumnStretch(4, 1)
+
+        body = QGridLayout()
+        body.setContentsMargins(0, 0, 0, 0)
+        body.setHorizontalSpacing(8)
+        body.setColumnMinimumWidth(0, side_w)
+        body.addLayout(side_col, 0, 0)
+        body.addWidget(self.view, 0, 1)
+        notdup_box = QVBoxLayout()
+        notdup_box.addWidget(self.btn_notdup)
+        notdup_box.addWidget(self.btn_reopen)
+        body.addLayout(notdup_box, 1, 0)
+        body.addLayout(transport, 1, 1)
+        body.setRowStretch(0, 1)
+        body.setColumnStretch(1, 1)
+        dl.addLayout(body, 1)
 
         split = QSplitter(Qt.Vertical)
         split.addWidget(self.table)
@@ -270,33 +362,53 @@ class MainWindow(QMainWindow):
         self._enable_detail(False)
 
     def _build_menu(self):
-        m = self.menuBar().addMenu("&Datei")
-        a = QAction("Ordner hinzufügen …", self)
+        m = self.menuBar().addMenu(T("&Datei"))
+        a = QAction(T("Ordner hinzufügen …"), self)
         a.triggered.connect(self._add_folder)
         m.addAction(a)
         m.addSeparator()
-        a = QAction("Datenbank öffnen …", self)
+        a = QAction(T("Datenbank öffnen …"), self)
         a.triggered.connect(self._open_db)
         m.addAction(a)
-        a = QAction("Neue Datenbank …", self)
+        a = QAction(T("Neue Datenbank …"), self)
         a.triggered.connect(self._new_db)
         m.addAction(a)
         m.addSeparator()
-        a = QAction("Nicht lesbare Dateien …", self)
+        a = QAction(T("Nicht lesbare Dateien …"), self)
         a.triggered.connect(self._show_unreadable)
         m.addAction(a)
-        a = QAction("Abgleich und Feinvergleich neu berechnen", self)
-        a.setToolTip("Index bleibt erhalten; offene Paare werden neu gesucht (Prüfstand bleibt).")
+        a = QAction(T("Abgleich und Feinvergleich neu berechnen"), self)
+        a.setToolTip(T("Index bleibt erhalten; offene Paare werden neu gesucht (Prüfstand bleibt)."))
         a.triggered.connect(self._reset_matching)
         m.addAction(a)
         m.addSeparator()
-        a = QAction("Beenden", self)
+        a = QAction(T("Beenden"), self)
         a.triggered.connect(self.close)
         m.addAction(a)
-        h = self.menuBar().addMenu("&Hilfe")
-        a = QAction(f"Über {APP_NAME} …", self)
+        e = self.menuBar().addMenu(T("&Bearbeiten"))
+        self.act_undo = QAction(T("Rückgängig"), self)
+        self.act_undo.setShortcut(QKeySequence.Undo)
+        self.act_undo.setEnabled(False)
+        self.act_undo.triggered.connect(self._do_undo)
+        e.addAction(self.act_undo)
+        h = self.menuBar().addMenu(T("&Hilfe"))
+        a = QAction(T("Über {app} …", app=APP_NAME), self)
         a.triggered.connect(self._about)
         h.addAction(a)
+        h.addSeparator()
+        lm = h.addMenu("Sprache · Language · Langue")
+        for code, name in LANGS.items():
+            a = QAction(name, self)
+            a.setCheckable(True)
+            a.setChecked(code == LANG)
+            a.triggered.connect(lambda _=False, c=code: self._choose_language(c))
+            lm.addAction(a)
+        self.act_updates = QAction(T("Nach Updates suchen"), self)
+        self.act_updates.setCheckable(True)
+        self.act_updates.setChecked(self.updates.enabled())
+        self.act_updates.setToolTip(T("Einmal am Tag auf GitHub nachsehen, ob es eine neue Version gibt"))
+        self.act_updates.toggled.connect(self._toggle_updates)
+        h.addAction(self.act_updates)
 
     def _show_unreadable(self):
         from .unreadable_dialog import UnreadableDialog
@@ -315,7 +427,6 @@ class MainWindow(QMainWindow):
         sc(Qt.Key_A, lambda: self._choose_side(0))
         sc(Qt.Key_B, lambda: self._choose_side(1))
         sc(Qt.Key_N, lambda: self._set_review("not_dup"))
-        sc(Qt.Key_E, lambda: self._set_review("done"))
         sc(Qt.Key_Left, lambda: self._nudge(-5.0))
         sc(Qt.Key_Right, lambda: self._nudge(5.0))
 
@@ -343,16 +454,16 @@ class MainWindow(QMainWindow):
         if not self.worker:
             todo = []
             if c.get("pending"):
-                todo.append(f"{c['pending']} Dateien ohne Fingerabdruck")
+                todo.append(T("{n} Dateien ohne Fingerabdruck", n=c["pending"]))
             if c.get("unmatched"):
-                todo.append(f"{c['unmatched']} nicht abgeglichen")
+                todo.append(T("{n} nicht abgeglichen", n=c["unmatched"]))
             if c.get("uncompared"):
-                todo.append(f"{c['uncompared']} Paare ohne Feinvergleich")
-            base = (f"{c.get('done', 0)} Dateien im Index, {c.get('pairs', 0)} Paare"
-                    + (f" · {c['error']} nicht lesbar" if c.get("error") else ""))
-            self.lbl_status.setText(base + (" · offen: " + ", ".join(todo) if todo else "")
-                                    if roots else "Noch keine Ordner – „Ordner hinzufügen …“ "
-                                                  "oder Ordner ins Fenster ziehen")
+                todo.append(T("{n} Paare ohne Feinvergleich", n=c["uncompared"]))
+            base = (T("{files} Dateien im Index, {pairs} Paare", files=c.get("done", 0), pairs=c.get("pairs", 0))
+                    + (" · " + T("{n} nicht lesbar", n=c["error"]) if c.get("error") else ""))
+            self.lbl_status.setText(base + (" · " + T("offen:") + " " + ", ".join(todo) if todo else "")
+                                    if roots else T("Noch keine Ordner – „Ordner hinzufügen …“ "
+                                                    "oder Ordner ins Fenster ziehen"))
         self.btn_run.setEnabled(bool(roots) and self.worker is None)
 
     def _live_reload(self):
@@ -371,8 +482,7 @@ class MainWindow(QMainWindow):
         if p is not None and p["id"] in changed:
             p.update(next(r for r in self.model.rows if r["id"] == p["id"]))   # self.current ist eine Kopie
             a, b = self.model.files[p["a_id"]], self.model.files[p["b_id"]]
-            self.lbl_a.setText(self._file_line("A", a, p["a_green"]))
-            self.lbl_b.setText(self._file_line("B", b, p["b_green"]))
+            self._show_info(p, (a, b))
             if not self._cur_cmp and p["cmp_version"]:
                 blob = self.db.get_diff(p["id"])
                 res = compare.unpack(blob) if blob else None
@@ -392,7 +502,7 @@ class MainWindow(QMainWindow):
         self.proxy.sort(self.table.horizontalHeader().sortIndicatorSection(),
                         self.table.horizontalHeader().sortIndicatorOrder())
         n = self.proxy.rowCount()
-        self.lbl_count.setText(f"{n} von {self.model.rowCount()} Paaren")
+        self.lbl_count.setText(T("{n} von {total} Paaren", n=n, total=self.model.rowCount()))
         if cur is not None:
             for r in range(n):
                 if self.proxy.index(r, 0).data(PAIR_ROLE)["id"] == cur:
@@ -401,7 +511,7 @@ class MainWindow(QMainWindow):
 
     # ------------------------------------------------------------ Phasen
     def _add_folder(self):
-        d = QFileDialog.getExistingDirectory(self, "Ordner mit Musik wählen",
+        d = QFileDialog.getExistingDirectory(self, T("Ordner mit Musik wählen"),
                                              self.db.get_setting("last_dir", "") or "")
         if d:
             self.db.set_setting("last_dir", d)
@@ -419,7 +529,7 @@ class MainWindow(QMainWindow):
 
     def _start_job(self, targets: list[str]):
         if self.worker is not None:
-            QMessageBox.information(self, APP_NAME, "Es läuft bereits eine Analyse.")
+            QMessageBox.information(self, APP_NAME, T("Es läuft bereits eine Analyse."))
             return
         targets = list(dict.fromkeys(targets))
         b = self.bridge
@@ -430,11 +540,11 @@ class MainWindow(QMainWindow):
             msg = "fertig"
             try:
                 for name, make in (
-                        ("Phase 1 von 3: Index", lambda: Indexer(self.db, targets, workers, b.status.emit,
+                        ("p1", lambda: Indexer(self.db, targets, workers, b.status.emit,
                                                                  b.progress.emit)),
-                        ("Phase 2 von 3: Abgleich", lambda: Matcher(self.db, variants, b.status.emit,
+                        ("p2", lambda: Matcher(self.db, variants, b.status.emit,
                                                                     b.progress.emit)),
-                        ("Phase 3 von 3: Feinvergleich", lambda: Comparer(self.db, workers, titles,
+                        ("p3", lambda: Comparer(self.db, workers, titles,
                                                                           b.status.emit, b.progress.emit))):
                     b.phase.emit(name)
                     self.job = make()
@@ -457,7 +567,7 @@ class MainWindow(QMainWindow):
     def _stop_job(self):
         if self.job is not None:
             self.job.stop.set()
-            self.lbl_status.setText("Wird angehalten …")
+            self.lbl_status.setText(T("Wird angehalten …"))
 
     def _on_status(self, text: str):
         self.lbl_status.setText(text)
@@ -470,9 +580,10 @@ class MainWindow(QMainWindow):
         if name == "reload":
             self._live_reload()
         else:
-            self.progress.setFormat(f"{name.split(':')[0]}: %p %")
+            self.progress.setFormat(PHASES[name].split(":")[0] + ": %p %")
+            self.progress.setToolTip(PHASES[name])
             self.progress.setValue(0)
-            if name.startswith(("Phase 2", "Phase 3")):
+            if name in ("p2", "p3"):
                 self.live_timer.start()
 
     def _on_finished(self, msg: str):
@@ -485,15 +596,16 @@ class MainWindow(QMainWindow):
         self._live_reload()        # kein Reset: ein gerade gehoertes Paar spielt weiter
         self._refresh_status()
         if msg.startswith("Fehler"):
-            QMessageBox.warning(self, APP_NAME, f"Analyse abgebrochen:\n{msg[7:]}\n\nDetails: {ERROR_LOG}")
+            QMessageBox.warning(self, APP_NAME, T("Analyse abgebrochen:\n{err}\n\nDetails: {log}",
+                                                  err=msg[7:], log=ERROR_LOG))
         elif msg == "angehalten":
-            self.lbl_status.setText("Angehalten – „Analyse fortsetzen“ macht an derselben Stelle weiter")
+            self.lbl_status.setText(T("Angehalten – „Analyse fortsetzen“ macht an derselben Stelle weiter"))
 
     def _reset_matching(self):
         if self.worker is not None:
             return
-        if QMessageBox.question(self, APP_NAME, "Alle offenen Paare verwerfen und Abgleich sowie Feinvergleich "
-                                                "beim nächsten Lauf neu berechnen?\nDer Index (Phase 1) bleibt.") \
+        if QMessageBox.question(self, APP_NAME, T("Alle offenen Paare verwerfen und Abgleich sowie Feinvergleich "
+                                                  "beim nächsten Lauf neu berechnen?\nDer Index (Phase 1) bleibt.")) \
                 == QMessageBox.Yes:
             self.db.reset_matching()
             self.reload()
@@ -503,7 +615,7 @@ class MainWindow(QMainWindow):
         if not cur.isValid():
             self.current = None
             self.player.stop()
-            self.view.clear("Paar in der Liste wählen")
+            self.view.clear(T("Paar in der Liste wählen"))
             self._enable_detail(False)
             return
         p = cur.data(PAIR_ROLE)
@@ -512,8 +624,7 @@ class MainWindow(QMainWindow):
         self.current = p
         a, b = self.model.files[p["a_id"]], self.model.files[p["b_id"]]
         self._enable_detail(True)
-        self.lbl_a.setText(self._file_line("A", a, p["a_green"]))
-        self.lbl_b.setText(self._file_line("B", b, p["b_green"]))
+        self._show_info(p, (a, b))
         import numpy as np
         prev_a = np.frombuffer(self.db.preview(a["id"]) or b"", np.uint8) / 255.0
         prev_b = np.frombuffer(self.db.preview(b["id"]) or b"", np.uint8) / 255.0
@@ -524,7 +635,7 @@ class MainWindow(QMainWindow):
         self.view.set_compare(res)
         self.player.set_compare(res)
         self.player.load(p["id"], a["path"], b["path"], p["time_scale"], p["offset_s"])
-        self.lbl_pos.setText("lädt …")
+        self.lbl_pos.setText(T("lädt …"))
 
     @staticmethod
     def _folder_count(folder: str) -> int | None:
@@ -535,43 +646,64 @@ class MainWindow(QMainWindow):
         except OSError:
             return None
 
-    def _pack_info(self, f: dict) -> str:
-        """'Packrate 58 % · 912 kbit/s' -- Packrate nur bei verlustfreien Formaten (Groesse zu PCM)."""
+    def _audio_info(self, f: dict) -> dict:
+        """Bitrate, Packrate (nur verlustfreie Formate: Groesse zu PCM) und Kanaele -- zwischengespeichert."""
         key = (f["path"], f.get("size"))
-        cache = self._pack_cache
-        if key not in cache:
-            parts = []
+        if key not in self._pack_cache:
+            out = {}
             size, dur = f.get("size") or 0, f.get("duration") or 0
+            if size and dur:
+                out["bitrate"] = f"{size * 8 / dur / 1000:.0f} kbit/s"
             try:
                 info = probe(f["path"])
                 m = re.search(r"PCM_(\d+)", info.codec or "")
                 if m and size and dur:
-                    raw = info.sr * info.channels * int(m.group(1)) / 8 * dur
-                    parts.append(f"Packrate {100 * size / raw:.0f} %")
+                    out["pack"] = f"{100 * size / (info.sr * info.channels * int(m.group(1)) / 8 * dur):.0f} %"
                 if info.channels:
-                    parts.append({1: "Mono", 2: "Stereo"}.get(info.channels, f"{info.channels} Kanäle"))
+                    out["channels"] = {1: "Mono", 2: "Stereo"}.get(info.channels, T("{n} Kanäle", n=info.channels))
             except Exception:
                 pass
-            if size and dur:
-                parts.insert(1 if parts and parts[0].startswith("Packrate") else 0,
-                             f"{size * 8 / dur / 1000:.0f} kbit/s")
-            cache[key] = "  ·  ".join(parts)
-        return cache[key]
+            self._pack_cache[key] = out
+        return self._pack_cache[key]
 
-    def _file_line(self, side: str, f: dict, green) -> str:
-        info = f"<b>{side}</b>  {f['path']}"
-        n = self._folder_count(f.get("folder") or os.path.dirname(f["path"]))
-        if n is not None:
-            info += f"  <span style='color:#999'>({n} {'Datei' if n == 1 else 'Dateien'} im Ordner)</span>"
-        info += f"  ·  {fmt_time(f['duration'])}"
-        if f.get("sr"):
-            info += f"  ·  {f['sr'] / 1000:g} kHz"
-        pack = self._pack_info(f)
-        if pack:
-            info += f"  ·  {pack}"
-        if green is not None:
-            info += f"  ·  <span style='color:#6c6'>{100 * green:.0f} % gleich klingend</span>"
-        return info
+    def _cover(self, path: str) -> bytes | None:
+        """Coverbild (eingebettet oder Ordnerbild), die letzten Dateien zwischengespeichert."""
+        if path not in self._covers:
+            if len(self._covers) > 64:
+                self._covers.pop(next(iter(self._covers)))
+            try:
+                self._covers[path] = cover_bytes(path)
+            except Exception:
+                self._covers[path] = None
+        return self._covers[path]
+
+    def _show_info(self, p: dict | None, files: tuple | None):
+        """Dateiinfo A/B in Spalten: Datei (mit Anzahl im Ordner), Länge, Abtastrate, Bitrate, Packrate,
+        Kanäle, gleich klingender Anteil."""
+        for r, btn in enumerate((self.btn_trash_a, self.btn_trash_b)):
+            btn.set_cover(None if files is None else self._cover(files[r]["path"]))
+        for r in range(2):
+            cells = self.info_cells[r]
+            if files is None:
+                for c in range(1, INFO_COLS):
+                    cells[c].setText("")
+                continue
+            f = files[r]
+            folder = f.get("folder") or os.path.dirname(f["path"])
+            n = self._folder_count(folder)
+            count = "" if n is None else ("<span style='color:#999'>" + (T("1 Datei im Ordner") if n == 1 else
+                                                                         T("{n} Dateien im Ordner", n=n)) + "</span>")
+            ai = self._audio_info(f)
+            green = p["a_green" if r == 0 else "b_green"]
+            cells[1].setToolTip(f["path"])
+            cells[2].setToolTip(f["path"])
+            vals = [os.path.join(folder, ""), f"<b>{f.get('filename') or os.path.basename(f['path'])}</b>", count,
+                    fmt_time(f["duration"]), f"{f['sr'] / 1000:g} kHz" if f.get("sr") else "",
+                    ai.get("bitrate", ""), T("Packrate {p}", p=ai["pack"]) if "pack" in ai else "", ai.get("channels", ""),
+                    ("<span style='color:#6c6'>" + T("{p} % gleich klingend", p=f"{100 * green:.0f}") + "</span>")
+                    if green is not None else ""]
+            for c, v in enumerate(vals, start=1):
+                cells[c].setText(v)
 
     def _load_compare(self, p: dict):
         blob = self.db.get_diff(p["id"])
@@ -619,11 +751,13 @@ class MainWindow(QMainWindow):
 
     def _enable_detail(self, on: bool):
         for w in (self.btn_play, self.btn_a, self.btn_b, self.btn_trash_a, self.btn_trash_b, self.btn_dir_a,
-                  self.btn_dir_b, self.btn_notdup, self.btn_done, self.btn_reopen):
+                  self.btn_dir_b, self.btn_notdup, self.btn_reopen):
             w.setEnabled(on)
+        reviewed = on and self.current is not None and self.current.get("review") != "open"
+        self.btn_reopen.setVisible(reviewed)
+        self.btn_notdup.setVisible(not reviewed)
         if not on:
-            self.lbl_a.setText("")
-            self.lbl_b.setText("")
+            self._show_info(None, None)
             self.lbl_pos.setText("")
 
     # ------------------------------------------------------------ Wiedergabe
@@ -656,42 +790,93 @@ class MainWindow(QMainWindow):
         self._on_side(side)
 
     def _on_play_state(self, playing: bool):
-        self.btn_play.setText("⏸  Pause" if playing else "▶  Abspielen")
+        self.btn_play.setText("⏸  " + T("Pause") if playing else "▶  " + T("Abspielen"))
 
     # ------------------------------------------------------------ Aktionen
+    def _select_after_change(self, row: int, keep_pair: int | None = None):
+        self.current = None
+        self._apply_filter(-1 if keep_pair is None else keep_pair)
+        if keep_pair is None and self.proxy.rowCount():
+            self.table.selectRow(min(max(row, 0), self.proxy.rowCount() - 1))
+
     def _set_review(self, review: str):
         if self.current is None:
             return
         pid = self.current["id"]
+        old = self.db.get_review([pid]).get(pid, "open")
+        if old == review:
+            return
         row = self.table.currentIndex().row()
         self.db.set_review([pid], review)
         self.model.update_pair(pid, review=review)
-        self.current = None
-        self._apply_filter(-1)
-        if self.proxy.rowCount():
-            self.table.selectRow(min(row, self.proxy.rowCount() - 1))
+        label = {"not_dup": T("„Kein Duplikat“"), "open": T("„Wieder in die Liste“")}.get(review, review)
+
+        def undo():
+            self.db.set_review([pid], old)
+            self.model.update_pair(pid, review=old)
+            self._select_after_change(0, pid)
+        self._push_undo(label, undo)
+        self._select_after_change(row)
 
     def _trash(self, side: int):
         if self.current is None:
             return
         fid = self.current["a_id" if side == 0 else "b_id"]
+        pid = self.current["id"]
         f = self.model.files[fid]
-        if QMessageBox.question(self, APP_NAME, f"{'AB'[side]} in den Papierkorb legen?\n\n{f['path']}") \
+        if QMessageBox.question(self, APP_NAME, T("{side} in den Papierkorb legen?\n\n{path}", side="AB"[side],
+                                                  path=f["path"])) \
                 != QMessageBox.Yes:
             return
         self.player.stop()
+        self.player.wait_idle()
+        snap = self.db.snapshot_file(fid)
         try:
             send2trash(f["path"])
         except Exception as exc:
-            QMessageBox.warning(self, APP_NAME, f"Konnte nicht gelöscht werden:\n{exc}")
+            QMessageBox.warning(self, APP_NAME, T("Konnte nicht gelöscht werden:\n{err}", err=exc))
             return
         row = self.table.currentIndex().row()
         self.db.file_removed(fid)
         self.model.remove_file(fid)
-        self.current = None
-        self._apply_filter(-1)
-        if self.proxy.rowCount():
-            self.table.selectRow(min(row, self.proxy.rowCount() - 1))
+        path = f["path"]
+
+        def undo():
+            if not recycle.restore(path):
+                raise RuntimeError(T("Nicht mehr im Papierkorb:\n{path}", path=path))
+            self.db.restore_snapshot(snap)
+            self.current = None
+            self.reload(keep_pair=pid)
+        self._push_undo(T("Papierkorb: {name}", name=os.path.basename(path)), undo)
+        self._select_after_change(row)
+
+    # ------------------------------------------------------------ Rueckgaengig
+    def _push_undo(self, label: str, fn):
+        self._undo.append((label, fn))
+        del self._undo[:-UNDO_LIMIT]
+        self._update_undo_action()
+
+    def _update_undo_action(self):
+        if self._undo:
+            self.act_undo.setText(T("Rückgängig: {what}", what=self._undo[-1][0]))
+            self.act_undo.setEnabled(True)
+        else:
+            self.act_undo.setText(T("Rückgängig"))
+            self.act_undo.setEnabled(False)
+
+    def _do_undo(self):
+        if not self._undo or self._reeval_busy:
+            return
+        label, fn = self._undo.pop()
+        self.player.stop()
+        self.player.wait_idle()
+        try:
+            fn()
+            self.lbl_status.setText(T("Rückgängig gemacht: {what}", what=label))
+        except Exception as exc:
+            log_error("Rückgängig", exc)
+            QMessageBox.warning(self, APP_NAME, T("Konnte nicht rückgängig gemacht werden:\n{err}", err=exc))
+        self._update_undo_action()
 
     # ------------------------------------------------------------ Bearbeiten
     def _red_ranges(self, side: int) -> list[tuple[float, float]]:
@@ -713,18 +898,22 @@ class MainWindow(QMainWindow):
 
     def _open_editor(self, side: int, t: float = 0.0):
         """Rechtsklick in eine Welle: Editor wie in FlacCheck (Schnitt, Kuerzung, Teile, Tags, Name)."""
-        if self.current is None:
+        if self.current is None or self._reeval_busy:
             return
         from .editor import EditorWindow
         f = self.model.files[self.current["a_id" if side == 0 else "b_id"]]
+        partner = self.current["b_id" if side == 0 else "a_id"]
         if not os.path.exists(f["path"]):
-            QMessageBox.warning(self, APP_NAME, f"Datei nicht gefunden:\n{f['path']}")
+            QMessageBox.warning(self, APP_NAME, T("Datei nicht gefunden:\n{path}", path=f["path"]))
             return
-        self.player.pause()
+        self.player.stop()
+        self.player.wait_idle()
         markers = [(a, b, theme.SIM_RED, False) for a, b in self._red_ranges(side)]
+        ctx = {"fid": f["id"], "partner": partner, "pair": self.current["id"],
+               "snap": self.db.snapshot_file(f["id"]), "tags": editing.read_tags(f["path"])}
         ed = EditorWindow(f["path"], f["duration"], markers, t, self)
-        ed.saved.connect(lambda paths, orig, kept, fid=f["id"]: self._on_edited(fid, paths, orig, kept))
-        ed.retagged.connect(lambda old, new, fid=f["id"]: self._on_retagged(fid, old, new))
+        ed.saved.connect(lambda paths, orig, renamed, kept, c=ctx: self._on_edited(c, paths, orig, renamed, kept))
+        ed.retagged.connect(lambda old, new, c=ctx: self._on_retagged(c, old, new))
         ed.setAttribute(Qt.WA_DeleteOnClose)
         ed.show()
 
@@ -735,13 +924,11 @@ class MainWindow(QMainWindow):
                    for r in self.db.roots()):
             self.db.add_root(os.path.dirname(path))
 
-    def _on_edited(self, fid: int, paths: list, original: str, kept_as: str):
-        """Geschnittene/gekuerzte Teile als ungepruefte Dateien eintragen; das Original faellt mit
-        seinen Paaren heraus (oder bleibt unter neuem Namen, falls behalten)."""
+    def _on_edited(self, ctx: dict, paths: list, original: str, renamed: str, kept: bool):
+        """Geschnitten/gekuerzt/geteilt: Die neuen Teile werden sofort neu bewertet (Fingerabdruck +
+        Feinvergleich mit dem Partner des Paares). Bis dahin bleibt das Paar in der Liste stehen;
+        danach ersetzen die neuen Paare das alte und das beste wird ausgewaehlt."""
         self.player.stop()
-        self.db.file_removed(fid, os.path.normpath(kept_as) if kept_as else None)
-        if not kept_as:
-            self.model.remove_file(fid)
         new = []
         for p in paths:
             p = os.path.normpath(p)
@@ -752,35 +939,82 @@ class MainWindow(QMainWindow):
                 continue
             new.append((p, st.st_size, st.st_mtime))
             self._ensure_root(p)
-        self.db.register(new)
-        self._after_edit(f"{len(new)} bearbeitete Datei(en) eingetragen")
+        ctx.update(original=os.path.normpath(original), renamed=os.path.normpath(renamed), kept=kept,
+                   new=[p for p, _s, _m in new], reg=new)
+        self._reeval_busy = True
+        self._enable_detail(False)
+        self.view.clear(T("Neubewertung der bearbeiteten Datei läuft …"))
+        self.lbl_status.setText(T("Neubewertung: {n} bearbeitete Datei(en) werden analysiert …", n=len(new)))
+        b = self.bridge
 
-    def _on_retagged(self, fid: int, old: str, new: str):
-        """Nur Tags/Name geaendert: Eintrag zieht mit um (Paare und Pruefstand bleiben) und wird
-        als ungeprueft neu eingelesen."""
+        def work():
+            results = []
+            try:
+                # Original austragen (ein gekuerzter Teil kann seinen Pfad uebernommen haben), Teile eintragen
+                self.db.file_removed(ctx["fid"], ctx["renamed"] if kept else None)
+                self.db.register(ctx["reg"])
+                results = reevaluate(self.db, ctx["new"], ctx["partner"])
+            except Exception as exc:
+                log_error("Neubewertung", exc)
+            b.reevaluated.emit(ctx, results)
+        threading.Thread(target=work, daemon=True).start()
+
+    def _on_reevaluated(self, ctx: dict, results: list):
+        self._reeval_busy = False
+        new_ids = [self.db.file_id(p) for p in ctx["new"]]
+        best = max(results, key=lambda r: r[1])[0] if results else None
+        self.current = None
+        self.reload(keep_pair=best)
+        if best is None and self.proxy.rowCount():
+            self.table.selectRow(0)
+
+        def undo():
+            for p, fid in zip(ctx["new"], new_ids):
+                if fid is not None:
+                    self.db.file_removed(fid)
+                if os.path.exists(p):
+                    send2trash(p)
+            if ctx["kept"]:
+                move_file(ctx["renamed"], ctx["original"])
+            elif not recycle.restore(ctx["renamed"], ctx["original"]):
+                raise RuntimeError(T("Original nicht mehr im Papierkorb:\n{path}", path=ctx["renamed"]))
+            self.db.restore_snapshot(ctx["snap"])
+            self.current = None
+            self.reload(keep_pair=ctx["pair"])
+        self._push_undo(T("Bearbeiten: {name}", name=os.path.basename(ctx["original"])), undo)
+        msg = T("{n} bearbeitete Datei(en) neu bewertet", n=len(ctx["new"]))
+        if results:
+            msg += " – " + T("beste Übereinstimmung mit dem Partner {p} %", p=f"{max(r[1] for r in results):.0f}")
+        self.lbl_status.setText(msg + " · " + T("Abgleich mit dem übrigen Archiv beim nächsten „Analyse fortsetzen“"))
+
+    def _on_retagged(self, ctx: dict, old: str, new: str):
+        """Nur Tags/Name geaendert: Klang und Fingerabdruck bleiben gueltig, das Paar bleibt stehen."""
         new = os.path.normpath(new)
+        old = os.path.normpath(old)
         try:
             st = os.stat(new)
         except OSError as exc:
             log_error("Umbenennen eintragen", exc)
             return
-        if os.path.normcase(new) != os.path.normcase(os.path.normpath(old)):
-            self.db.relocate(fid, new, st.st_size, st.st_mtime)
+        fid = ctx["fid"]
+        self.db.update_file_meta(fid, new, st.st_size, st.st_mtime, read_tags(new))
+        if os.path.normcase(os.path.dirname(new)) != os.path.normcase(os.path.dirname(old)):
             self._ensure_root(new)
-        self.db.register([(new, st.st_size, st.st_mtime)])
-        f = self.model.files.get(fid)
-        if f is not None:
-            f.update(path=new, folder=os.path.dirname(new), filename=os.path.basename(new))
-        self._after_edit("Änderungen gespeichert")
-
-    def _after_edit(self, what: str):
-        busy = self.worker is not None
+        self.player.stop()
         self.current = None
-        self.reload()
-        if not busy:
-            self._refresh_status()
-        self.lbl_status.setText(f"{what} – {'werden nach diesem Lauf' if busy else 'werden beim nächsten'} "
-                                "„Analyse fortsetzen“ neu analysiert und abgeglichen")
+        self.reload(keep_pair=ctx["pair"])
+
+        def undo():
+            editing.write_tags(new, {k: ctx["tags"].get(k, "") for k, _ in editing.TAG_FIELDS})
+            if os.path.normcase(new) != os.path.normcase(old):
+                move_file(new, old)
+            st2 = os.stat(old)
+            self.db.restore_snapshot(ctx["snap"])
+            self.db.update_file_meta(fid, old, st2.st_size, st2.st_mtime, read_tags(old))
+            self.current = None
+            self.reload(keep_pair=ctx["pair"])
+        self._push_undo(T("Tags/Name: {name}", name=os.path.basename(new)), undo)
+        self.lbl_status.setText(T("Gespeichert: {name}", name=os.path.basename(new)))
 
     def _open_dir(self, side: int):
         if self.current is None:
@@ -794,7 +1028,7 @@ class MainWindow(QMainWindow):
     # ------------------------------------------------------------ Datenbank
     def _switch_db(self, path: str):
         if self.worker is not None:
-            QMessageBox.information(self, APP_NAME, "Bitte erst die laufende Analyse anhalten.")
+            QMessageBox.information(self, APP_NAME, T("Bitte erst die laufende Analyse anhalten."))
             return
         self.player.stop()
         self.db.close()
@@ -807,19 +1041,55 @@ class MainWindow(QMainWindow):
         self.reload()
 
     def _open_db(self):
-        p, _ = QFileDialog.getOpenFileName(self, "Datenbank öffnen", str(APP_DATA_DIR),
-                                           "FlacDup-Datenbank (*.db);;Alle Dateien (*)")
+        p, _ = QFileDialog.getOpenFileName(self, T("Datenbank öffnen"), str(APP_DATA_DIR),
+                                           T("FlacDup-Datenbank (*.db);;Alle Dateien (*)"))
         if p:
             self._switch_db(p)
 
     def _new_db(self):
-        p, _ = QFileDialog.getSaveFileName(self, "Neue Datenbank", str(APP_DATA_DIR / "flacdup_neu.db"),
-                                           "FlacDup-Datenbank (*.db)")
+        p, _ = QFileDialog.getSaveFileName(self, T("Neue Datenbank"), str(APP_DATA_DIR / "flacdup_neu.db"),
+                                           T("FlacDup-Datenbank (*.db)"))
         if p:
             if os.path.exists(p):
-                QMessageBox.warning(self, APP_NAME, "Die Datei gibt es schon – bitte einen neuen Namen wählen.")
+                QMessageBox.warning(self, APP_NAME, T("Die Datei gibt es schon – bitte einen neuen Namen wählen."))
                 return
             self._switch_db(p)
+
+    # ------------------------------------------------------------ Sprache / Updates
+    def _choose_language(self, code: str):
+        set_language(code)
+        if code != LANG:
+            QMessageBox.information(self, APP_NAME, {
+                "de": "Die Sprache wechselt beim nächsten Start von FlacDup.",
+                "en": "The language changes the next time FlacDup starts.",
+                "fr": "La langue changera au prochain démarrage de FlacDup."}[code])
+
+    def _toggle_updates(self, on: bool):
+        self.updates.set_enabled(on)
+        if on:
+            self.updates.start(force=True)
+        else:
+            self.btn_update.setVisible(False)
+
+    def _on_update_found(self, version: str):
+        self._new_version = version
+        self.btn_update.setText(T("Update {v} verfügbar", v=version))
+        self.btn_update.setToolTip(T("Version {v} steht auf GitHub bereit – klicken für Download", v=version))
+        self.btn_update.setVisible(True)
+
+    def _update_menu(self):
+        from PySide6.QtCore import QUrl
+        from PySide6.QtGui import QDesktopServices
+        from PySide6.QtWidgets import QMenu
+        from .update_check import RELEASES_URL
+        m = QMenu(self)
+        a = m.addAction(T("Download-Seite öffnen"))
+        a.triggered.connect(lambda: QDesktopServices.openUrl(QUrl(RELEASES_URL)))
+        a = m.addAction(T("Diese Version ausblenden"))
+        a.triggered.connect(lambda: (self.updates.skip(self._new_version), self.btn_update.setVisible(False)))
+        a = m.addAction(T("Nicht mehr nach Updates suchen"))
+        a.triggered.connect(lambda: self.act_updates.setChecked(False))
+        m.exec(self.btn_update.mapToGlobal(self.btn_update.rect().bottomLeft()))
 
     def _about(self):
         from .about_dialog import AboutDialog

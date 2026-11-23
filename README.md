@@ -7,7 +7,8 @@ schneller oder langsamer abgespielte und in der Tonhöhe verschobene Fassungen s
 Aufnahmen desselben Songs.
 
 Jedes gefundene Paar zeigt **beide Wellenformen** untereinander, gemeinsame Stellen übereinander:
-**grün** klingt gleich, **rot** verschieden, grau gibt es in der anderen Datei nicht. Beim Abhören
+**rot** klingt verschieden, grau gibt es in der anderen Datei nicht, „klingt gleich“ ist je Format
+eingefärbt (MP3 **grün**, FLAC **himmelblau**, andere Formate **pink**). Beim Abhören
 schaltet **Tab** millisekundengenau zwischen A und B um – an der passenden Stelle der anderen Datei,
 sodass es wie ein durchgehender Track klingt.
 
@@ -32,23 +33,32 @@ Warnung („Weitere Informationen“ → „Trotzdem ausführen“).
    oder Absturz macht **Analyse fortsetzen** an derselben Stelle weiter. Funde aus Phase 2 und 3
    erscheinen schon während der Analyse in der Liste.
 3. Paar in der Liste wählen, abspielen (**Leertaste**) und mit **Tab** (oder **A**/**B**) umschalten.
-4. Überflüssige Datei in den Papierkorb legen, oder das Paar als **Kein Duplikat** (**N**) bzw.
-   **Erledigt** (**E**) markieren – markierte Paare tauchen nicht wieder auf.
+4. Überflüssige Datei in den Papierkorb legen oder das Paar als **Kein Duplikat** (**N**) markieren –
+   es taucht dann nicht wieder auf. **Strg+Z** macht Papierkorb, Markierung, Schnitte und Umbenennungen
+   rückgängig (die Datei kommt aus dem Windows-Papierkorb zurück).
 
 Die Liste lässt sich nach Band, Titel, Album, Art, Übereinstimmung, Länge und Ordner sortieren und
-nach Art, Prüfstand und Suchtext filtern. Die Dateiinfo zeigt Pfad, Anzahl der Dateien im Ordner,
-Länge, Abtastrate, Bitrate, Packrate (bei verlustfreien Formaten) und den gleich klingenden Anteil.
+nach Art, Prüfstand und Suchtext filtern. **Rot geschrieben** sind Band bzw. Titel, wenn Interpret oder
+Haupttitel (ohne Klammerzusätze wie „(xyz-Mix)“) der beiden Dateien abweichen. Die Dateiinfo zeigt A und B
+in Spalten: Pfad mit Anzahl der Dateien im Ordner, Länge, Abtastrate, Bitrate, Packrate (bei verlustfreien
+Formaten), Kanäle und den gleich klingenden Anteil. Links neben jeder Welle liegt ihr Papierkorb-Knopf mit
+dem Coverbild der Datei (eingebettet oder Ordnerbild); beim Darüberfahren wird die betroffene Welle rot markiert.
 
 **Bearbeiten:** Rechtsklick in eine Welle öffnet den Editor für diese Datei: Anfang/Ende kürzen,
 Bereiche entfernen, in mehrere Teile zerlegen, Tags und Dateinamen ändern. MP3 wird ohne Neukodierung
 geschnitten (Frame-genau, ~26 ms), FLAC/WAV/AIFF sample-genau und verlustfrei. Die abweichenden
-Stellen aus dem Vergleich sind oben rot markiert. Neue Dateien werden als ungeprüft eingetragen und
-beim nächsten „Analyse fortsetzen“ neu analysiert; das Original wandert als »(Original) Name« in den
-Papierkorb (oder bleibt auf Wunsch so benannt im Ordner).
+Stellen aus dem Vergleich sind oben rot markiert. Nach dem Speichern werden die neuen Dateien sofort
+mit dem Partner des Paares verglichen und erscheinen als neues Paar; der Abgleich mit dem übrigen Archiv
+folgt beim nächsten „Analyse fortsetzen“. Das Original wandert als »(Original) Name« in den Papierkorb
+(oder bleibt auf Wunsch so benannt im Ordner). Nur Tags oder Name geändert: Das Paar bleibt stehen.
 
 **Verschobene Dateien** werden an Name und Spieldauer wiedererkannt und behalten Fingerabdruck und
 Prüfstand. **Datei → Nicht lesbare Dateien …** listet Dateien, die sich nicht einlesen ließen, mit
 Sprung in den Explorer. Mehrere Archive lassen sich in getrennten Datenbanken führen (Menü Datei).
+
+**Sprachen:** Deutsch, English, Français – Auswahl beim Setup oder unter Hilfe → „Sprache · Language ·
+Langue“ (gilt ab dem nächsten Start). **Updates:** FlacDup sieht einmal am Tag auf GitHub nach, ob es eine
+neue Version gibt, und zeigt dann einen grünen Knopf (abschaltbar unter Hilfe → „Nach Updates suchen“).
 
 ## Die drei Phasen
 
@@ -106,6 +116,8 @@ Feinvergleich im Worker-Prozess, Tags, deutsche Qt-Texte, Hauptfenster mit eigen
 ```
 python tests/cli_run.py <test.db> [--var] <Ordner …>   # alle drei Phasen ohne GUI
 python tests/gui_smoke.py <test.db> <Ausgabeordner> [Suche]
+python tests/gui_actions.py <test.db> <Testordner>     # Papierkorb/Editor/Rückgängig – NUR mit kopierten Dateien
+python tools/check_lang.py                             # alle Texte übersetzt? (muss „0 fehlen“ melden)
 ```
 
 ## Lizenz

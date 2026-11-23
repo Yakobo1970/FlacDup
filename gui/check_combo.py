@@ -6,6 +6,8 @@ from PySide6.QtGui import QStandardItem, QStandardItemModel
 from PySide6.QtWidgets import (QComboBox, QStyle, QStyledItemDelegate, QStyleOptionComboBox,
                                QStyleOptionViewItem, QStylePainter)
 
+from lang import T
+
 
 class CheckCombo(QComboBox):
     selection_changed = Signal()
@@ -128,13 +130,13 @@ class CheckCombo(QComboBox):
         if n and len(checked) == n:
             text = self.all_label
         elif not checked:
-            text = f"Keine {self.noun}"
+            text = T("Keine {noun}", noun=self.noun)
         elif len(checked) == 1:
             row = [i for i in range(1, self._model.rowCount())
                    if self._model.item(i).checkState() == Qt.Checked][0]
             text = self._model.item(row).text()
         else:
-            text = f"{len(checked)} von {n} {self.noun}"
+            text = T("{k} von {n} {noun}", k=len(checked), n=n, noun=self.noun)
         self._summary = text
         self.setPlaceholderText(text)
         self.setCurrentIndex(-1)

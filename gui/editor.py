@@ -22,6 +22,7 @@ from PySide6.QtWidgets import (QAbstractItemView, QCheckBox, QFileDialog, QHBoxL
 
 from engine import editing
 from engine.decode import AUDIO_EXTENSIONS, DecodeReport, iter_mono_blocks
+from lang import T
 from paths import ASSETS_DIR
 
 from .player import LoopPlayer
@@ -161,7 +162,7 @@ class WaveEdit(QWidget):
             p.drawPath(path)
         else:
             p.setPen(QColor(160, 160, 160))
-            p.drawText(self.rect(), Qt.AlignCenter, "Wellenform wird geladen …")
+            p.drawText(self.rect(), Qt.AlignCenter, T("Wellenform wird geladen …"))
         # entfernte Bereiche deutlich rot schraffiert darueber
         for a, b in self.removed:
             r = QRectF(self.x_of(a), top, max(2.0, self.x_of(b) - self.x_of(a)), h - top)
@@ -173,7 +174,7 @@ class WaveEdit(QWidget):
             if r.width() > 70:
                 p.fillRect(QRectF(r.center().x() - 45, mid - 10, 90, 20), QColor(20, 22, 25, 220))
                 p.setPen(QColor(255, 140, 140))
-                p.drawText(QRectF(r.center().x() - 45, mid - 10, 90, 20), Qt.AlignCenter, "wird entfernt")
+                p.drawText(QRectF(r.center().x() - 45, mid - 10, 90, 20), Qt.AlignCenter, T("wird entfernt"))
         # Auswahl
         if self.sel:
             a, b = self.sel
@@ -185,7 +186,7 @@ class WaveEdit(QWidget):
             p.drawLine(QPointF(x, top), QPointF(x, h))
             p.fillRect(QRectF(x + 2, top + 2, 70, 16), QColor(255, 80, 80))
             p.setPen(QColor(255, 255, 255))
-            p.drawText(QRectF(x + 2, top + 2, 70, 16), Qt.AlignCenter, f"Schnitt {k}")
+            p.drawText(QRectF(x + 2, top + 2, 70, 16), Qt.AlignCenter, T("Schnitt {k}", k=k))
         # Cursor (die Abspielposition zeichnet paintEvent darueber)
         p.setPen(QPen(QColor(255, 255, 255), 1.0, Qt.DashLine))
         x = self.x_of(self.cursor)
@@ -236,10 +237,10 @@ class WaveEdit(QWidget):
 
 
 class EditorWindow(QWidget):
-    saved = Signal(list, str, str)      # neue Pfade, Original, neuer Ort des Originals ('' = Papierkorb)
+    saved = Signal(list, str, str, bool)   # neue Pfade, Original, umbenanntes Original, im Ordner behalten
     retagged = Signal(str, str)         # nur Tags/Name geaendert: alter Pfad, neuer Pfad
 
-    COLS = ["Teil", "Bereich", "Dauer", "Dateiname"] + [label for _, label in editing.TAG_FIELDS]
+    COLS = [T("Teil"), T("Bereich"), T("Dauer"), T("Dateiname")] + [label for _, label in editing.TAG_FIELDS]
 
     ORIG_PREFIX = "(Original)"
 
@@ -247,7 +248,7 @@ class EditorWindow(QWidget):
         super().__init__(parent, Qt.Window)
         self.src = path
         self._start_cursor = cursor
-        self.setWindowTitle(f"Bearbeiten – {os.path.basename(self.src)}")
+        self.setWindowTitle(T("Bearbeiten – {name}", name=os.path.basename(self.src)))
         icon = ASSETS_DIR / "editor_icon.ico"
         if icon.exists():
             self.setWindowIcon(QIcon(str(icon)))
@@ -264,10 +265,10 @@ class EditorWindow(QWidget):
         info = QLabel(f"<b>{os.path.basename(self.src)}</b><br><span style='color:#999'>{self.folder}</span>")
         info.setTextFormat(Qt.RichText)
         lay.addWidget(info)
-        hint = QLabel("Klick = Cursor · Ziehen = Auswahl · Mausrad = Zoom · Umschalt+Rad = verschieben · "
-                      "Leertaste = ab Cursor abspielen · S = Schnittpunkt · Entf = Auswahl entfernen · Strg+Z = rückgängig"
+        hint = QLabel(T("Klick = Cursor · Ziehen = Auswahl · Mausrad = Zoom · Umschalt+Rad = verschieben · "
+                        "Leertaste = ab Cursor abspielen · S = Schnittpunkt · Entf = Auswahl entfernen · Strg+Z = rückgängig")
                       + ("" if not self.src.lower().endswith(".mp3") else
-                         "  ·  MP3 wird ohne Neukodierung geschnitten (Schnitte rasten auf ~26 ms ein)"))
+                         "  ·  " + T("MP3 wird ohne Neukodierung geschnitten (Schnitte rasten auf ~26 ms ein)")))
         hint.setStyleSheet("color:#999")
         lay.addWidget(hint)
 
@@ -280,14 +281,14 @@ class EditorWindow(QWidget):
 
         bar = QHBoxLayout()
         self.lbl_pos = QLabel()
-        b_play = QPushButton("▶ ab Cursor")
-        b_loop = QPushButton("⟳ Auswahl in Schleife")
+        b_play = QPushButton("▶ " + T("ab Cursor"))
+        b_loop = QPushButton("⟳ " + T("Auswahl in Schleife"))
         b_stop = QPushButton("■")
-        b_split = QPushButton("Schnittpunkt am Cursor (S)")
-        b_cut = QPushButton("Auswahl entfernen (Entf)")
-        b_undo = QPushButton("Rückgängig")
-        b_reset = QPushButton("Alles zurücksetzen")
-        b_all = QPushButton("Ganzer Track")
+        b_split = QPushButton(T("Schnittpunkt am Cursor (S)"))
+        b_cut = QPushButton(T("Auswahl entfernen (Entf)"))
+        b_undo = QPushButton(T("Rückgängig"))
+        b_reset = QPushButton(T("Alles zurücksetzen"))
+        b_all = QPushButton(T("Ganzer Track"))
         for b in (b_play, b_loop, b_stop, b_split, b_cut, b_undo, b_reset, b_all):
             bar.addWidget(b)
         bar.addStretch(1)
@@ -305,7 +306,7 @@ class EditorWindow(QWidget):
         # letzte Spalte: Kontrollkaestchen, ob das Teilstueck gespeichert wird
         self.save_col = len(self.COLS)
         self.table = QTableWidget(0, len(self.COLS) + 1, self)
-        self.table.setHorizontalHeaderLabels(self.COLS + ["Speichern"])
+        self.table.setHorizontalHeaderLabels(self.COLS + [T("Speichern")])
         self.table.horizontalHeader().setSectionResizeMode(QHeaderView.Interactive)
         self.table.horizontalHeader().setStretchLastSection(True)
         self.table.setColumnWidth(3, 360)
@@ -316,22 +317,22 @@ class EditorWindow(QWidget):
 
         opts = QHBoxLayout()
         self.lbl_folder = QLabel()
-        b_folder = QPushButton("Zielordner …")
+        b_folder = QPushButton(T("Zielordner …"))
         b_folder.clicked.connect(self._choose_folder)
-        self.chk_keep = QCheckBox("Original nicht löschen/überschreiben")
-        self.chk_keep.setToolTip("Normalerweise wird das Original nach dem Schneiden als »(Original) Name« in den "
-                                 "Windows-Papierkorb gelegt.\nMit Häkchen bleibt es unter diesem Namen zusätzlich im "
-                                 "Originalordner.\nNur Tags/Name geändert: die Datei selbst wird angepasst.")
+        self.chk_keep = QCheckBox(T("Original nicht löschen/überschreiben"))
+        self.chk_keep.setToolTip(T("Normalerweise wird das Original nach dem Schneiden als »(Original) Name« in den "
+                                   "Windows-Papierkorb gelegt.\nMit Häkchen bleibt es unter diesem Namen zusätzlich im "
+                                   "Originalordner.\nNur Tags/Name geändert: die Datei selbst wird angepasst."))
         opts.addWidget(self.lbl_folder, 1)
         opts.addWidget(b_folder)
         opts.addWidget(self.chk_keep)
         lay.addLayout(opts)
         bottom = QHBoxLayout()
         self.lbl_summary = QLabel()
-        self.b_save = b_save = QPushButton("Speichern")
+        self.b_save = b_save = QPushButton(T("Speichern"))
         b_save.setDefault(True)
-        b_save.setMinimumWidth(b_save.fontMetrics().horizontalAdvance("1 gekürzte Datei speichern") + 40)
-        b_close = QPushButton("Schließen")
+        b_save.setMinimumWidth(b_save.fontMetrics().horizontalAdvance(T("1 gekürzte Datei speichern")) + 40)
+        b_close = QPushButton(T("Schließen"))
         b_save.clicked.connect(self._save)
         b_close.clicked.connect(self.close)
         bottom.addWidget(self.lbl_summary, 1)
@@ -350,7 +351,7 @@ class EditorWindow(QWidget):
         self._rebuild_parts()
         self._loader = _PeakLoader(self.src)
         self._loader.done.connect(self._on_peaks)
-        self._loader.failed.connect(lambda m: QMessageBox.warning(self, "Bearbeiten", f"Nicht lesbar: {m}"))
+        self._loader.failed.connect(lambda m: QMessageBox.warning(self, T("Bearbeiten"), T("Nicht lesbar: {err}", err=m)))
         self._loader.start()
 
     # ------------------------------------------------------------ Laden / Ansicht
@@ -377,8 +378,9 @@ class EditorWindow(QWidget):
         self.scroll.setPageStep(int(span * 1000))
         self.scroll.setValue(int(w.v0 * 1000))
         self.scroll.blockSignals(False)
-        sel = f"  ·  Auswahl {fmt_time(w.sel[0])} – {fmt_time(w.sel[1])} ({w.sel[1] - w.sel[0]:.1f} s)" if w.sel else ""
-        self.lbl_pos.setText(f"Cursor {fmt_time(w.cursor)}{sel}")
+        sel = ("  ·  " + T("Auswahl {a} – {b} ({len} s)", a=fmt_time(w.sel[0]), b=fmt_time(w.sel[1]),
+                             len=f"{w.sel[1] - w.sel[0]:.1f}")) if w.sel else ""
+        self.lbl_pos.setText(T("Cursor {t}", t=fmt_time(w.cursor)) + sel)
 
     def _on_play_pos(self, _fid, pos):
         self.wave.play_pos = pos
@@ -460,12 +462,12 @@ class EditorWindow(QWidget):
 
     def _defaults(self, i: int, n: int) -> list[str]:
         stem, ext = os.path.splitext(os.path.basename(self.src))
-        name = os.path.basename(self.src) if n == 1 else f"{stem} (Teil {i}){ext}"
+        name = os.path.basename(self.src) if n == 1 else f"{stem} ({T('Teil {i}', i=i)}){ext}"
         vals = []
         for key, _ in editing.TAG_FIELDS:
             v = self.orig_tags.get(key, "")
             if key == "title" and n > 1:
-                v = f"{v} (Teil {i})" if v else f"Teil {i}"
+                v = f"{v} ({T('Teil {i}', i=i)})" if v else T("Teil {i}", i=i)
             vals.append(v)
         return [name] + vals
 
@@ -478,7 +480,7 @@ class EditorWindow(QWidget):
         for i, ranges in enumerate(parts, 1):
             # Vorgabenamen nur ueber die gespeicherten Teile durchnummerieren (weggelassene zaehlen nicht)
             dflt = self._defaults(kept + 1, n_kept) if ranges else self._defaults(i, len(parts))
-            rng = " + ".join(f"{fmt_time(a)}–{fmt_time(b)}" for a, b in ranges) or "komplett entfernt"
+            rng = " + ".join(f"{fmt_time(a)}–{fmt_time(b)}" for a, b in ranges) or T("komplett entfernt")
             cells = [str(i), rng, f"{editing.part_duration(ranges):.1f} s" if ranges else "–"]
             cells += [self._edits.get(i, {}).get(c, dflt[c - 3]) for c in range(3, len(self.COLS))]
             for c, text in enumerate(cells):
@@ -488,17 +490,17 @@ class EditorWindow(QWidget):
                 if not ranges:
                     item.setForeground(QColor(140, 140, 140))
                 self.table.setItem(i - 1, c, item)
-            chk = QTableWidgetItem("speichern" if ranges else "weglassen")
+            chk = QTableWidgetItem(T("speichern") if ranges else T("weglassen"))
             chk.setFlags((chk.flags() | Qt.ItemIsUserCheckable) & ~Qt.ItemIsEditable)
             chk.setCheckState(Qt.Checked if ranges else Qt.Unchecked)
-            chk.setToolTip("Haken entfernen: dieses Teilstück nicht speichern (wird in der Wellenform rot "
-                           "als entfernt markiert)")
+            chk.setToolTip(T("Haken entfernen: dieses Teilstück nicht speichern (wird in der Wellenform rot "
+                             "als entfernt markiert)"))
             self.table.setItem(i - 1, self.save_col, chk)
             kept += bool(ranges)
         self._filling = False
         removed = sum(b - a for a, b in self.wave.removed)
-        self.lbl_summary.setText(f"{kept} Teilstück(e) · {len(self.wave.splits)} Schnittpunkt(e) · "
-                                 f"{removed:.1f} s werden entfernt (nicht gespeichert)")
+        self.lbl_summary.setText(T("{kept} Teilstück(e) · {splits} Schnittpunkt(e) · {sec} s werden entfernt "
+                                   "(nicht gespeichert)", kept=kept, splits=len(self.wave.splits), sec=f"{removed:.1f}"))
         self.b_save.setText(self._save_label(kept))
         self.b_save.setEnabled((bool(self.wave.splits or self.wave.removed) or self._meta_changed()) and kept > 0)
 
@@ -511,10 +513,10 @@ class EditorWindow(QWidget):
 
     def _save_label(self, kept: int) -> str:
         if not self.wave.splits and not self.wave.removed:
-            return "Änderungen speichern"
+            return T("Änderungen speichern")
         if kept == 1:
-            return "1 gekürzte Datei speichern" if self.wave.removed else "1 Datei speichern"
-        return f"{kept} Teilstücke speichern"
+            return T("1 gekürzte Datei speichern") if self.wave.removed else T("1 Datei speichern")
+        return T("{n} Teilstücke speichern", n=kept)
 
     def _on_item_changed(self, item):
         if self._filling:
@@ -556,15 +558,15 @@ class EditorWindow(QWidget):
 
     def _choose_folder(self):
         # Qt-eigener Dialog statt Windows-Ordnerauswahl: zeigt auch die Dateien im Ordner
-        dlg = QFileDialog(self, "Zielordner wählen", self.folder)
+        dlg = QFileDialog(self, T("Zielordner wählen"), self.folder)
         dlg.setFileMode(QFileDialog.Directory)
         dlg.setOption(QFileDialog.DontUseNativeDialog, True)
         dlg.setOption(QFileDialog.ShowDirsOnly, False)
-        dlg.setNameFilters(["Audiodateien (" + " ".join(f"*{e}" for e in sorted(AUDIO_EXTENSIONS)) + ")",
-                            "Alle Dateien (*)"])
-        for lbl, text in ((QFileDialog.Accept, "Ordner wählen"), (QFileDialog.Reject, "Abbrechen"),
-                          (QFileDialog.LookIn, "Suchen in:"), (QFileDialog.FileName, "Ordner:"),
-                          (QFileDialog.FileType, "Dateityp:")):
+        dlg.setNameFilters([T("Audiodateien") + " (" + " ".join(f"*{e}" for e in sorted(AUDIO_EXTENSIONS)) + ")",
+                            T("Alle Dateien") + " (*)"])
+        for lbl, text in ((QFileDialog.Accept, T("Ordner wählen")), (QFileDialog.Reject, T("Abbrechen")),
+                          (QFileDialog.LookIn, T("Suchen in:")), (QFileDialog.FileName, T("Ordner:")),
+                          (QFileDialog.FileType, T("Dateityp:"))):
             dlg.setLabelText(lbl, text)
         dlg.setViewMode(QFileDialog.Detail)
         dlg.resize(1000, 600)
@@ -581,7 +583,7 @@ class EditorWindow(QWidget):
             self._rebuild_parts()
 
     def _update_folder_label(self):
-        self.lbl_folder.setText(f"Zielordner: {self.folder}")
+        self.lbl_folder.setText(T("Zielordner: {path}", path=self.folder))
 
     # ------------------------------------------------------------ Speichern
     def _save(self):
@@ -599,7 +601,7 @@ class EditorWindow(QWidget):
             vals = [self.table.item(i - 1, c).text() for c in range(3, len(self.COLS))]
             name = vals[0].strip()
             if not name:
-                QMessageBox.warning(self, "Speichern", f"Teil {i}: Dateiname fehlt.")
+                QMessageBox.warning(self, T("Speichern"), T("Teil {i}: Dateiname fehlt.", i=i))
                 return
             if not name.lower().endswith(ext.lower()):
                 name += ext
@@ -607,21 +609,24 @@ class EditorWindow(QWidget):
             jobs.append((i, ranges, os.path.join(self.folder, name), tags))
         dsts = [os.path.normcase(j[2]) for j in jobs]
         if len(set(dsts)) != len(dsts):
-            QMessageBox.warning(self, "Speichern", "Zwei Teilstücke haben denselben Dateinamen.")
+            QMessageBox.warning(self, T("Speichern"), T("Zwei Teilstücke haben denselben Dateinamen."))
             return
         in_place = os.path.normcase(os.path.abspath(self.src)) in dsts
         clash = [j[2] for j in jobs if os.path.exists(j[2])
                  and os.path.normcase(j[2]) != os.path.normcase(os.path.abspath(self.src))]
         if clash:
-            QMessageBox.warning(self, "Speichern", "Diese Dateien gibt es schon:\n" + "\n".join(clash))
+            QMessageBox.warning(self, T("Speichern"), T("Diese Dateien gibt es schon:") + "\n" + "\n".join(clash))
             return
         keep = self.chk_keep.isChecked()
         src = os.path.abspath(self.src)
         old_name = self._defect_path(src, dsts)
-        msg = "\n".join(f"Teil {i}: {os.path.basename(d)}  ({editing.part_duration(r):.1f} s)" for i, r, d, _ in jobs)
-        where = "bleibt im Originalordner" if keep else "wandert in den Windows-Papierkorb"
-        msg += f"\n\nDas Original wird in »{os.path.basename(old_name)}« umbenannt und {where}."
-        if QMessageBox.question(self, self._save_label(len(jobs)), msg + "\n\nSpeichern?") != QMessageBox.Yes:
+        msg = "\n".join(T("Teil {i}: {name}  ({sec} s)", i=i, name=os.path.basename(d),
+                          sec=f"{editing.part_duration(r):.1f}") for i, r, d, _ in jobs)
+        msg += "\n\n" + (T("Das Original wird in »{name}« umbenannt und bleibt im Originalordner.",
+                           name=os.path.basename(old_name)) if keep else
+                         T("Das Original wird in »{name}« umbenannt und wandert in den Windows-Papierkorb.",
+                           name=os.path.basename(old_name)))
+        if QMessageBox.question(self, self._save_label(len(jobs)), msg + "\n\n" + T("Speichern?")) != QMessageBox.Yes:
             return
         self.player.stop()
         written, temps, renamed = [], [], False
@@ -646,10 +651,10 @@ class EditorWindow(QWidget):
                     os.remove(tmp)
             if renamed and os.path.exists(old_name) and not os.path.exists(src):
                 os.rename(old_name, src)
-            QMessageBox.critical(self, "Speichern", f"Fehler beim Schreiben:\n{exc}")
+            QMessageBox.critical(self, T("Speichern"), T("Fehler beim Schreiben:\n{err}", err=exc))
             return
         # Keine zweite Bestaetigung: die Abfrage oben nennt schon, wohin das Original geht
-        self.saved.emit(written, self.src, old_name if keep else "")
+        self.saved.emit(written, self.src, old_name, keep)
         self.close()
 
     def _save_meta(self):
@@ -658,7 +663,7 @@ class EditorWindow(QWidget):
         ext = os.path.splitext(self.src)[1]
         name = vals[0].strip()
         if not name:
-            QMessageBox.warning(self, "Speichern", "Dateiname fehlt.")
+            QMessageBox.warning(self, T("Speichern"), T("Dateiname fehlt."))
             return
         if not name.lower().endswith(ext.lower()):
             name += ext
@@ -668,18 +673,19 @@ class EditorWindow(QWidget):
         changed_tags = {k: v for k, v in tags.items() if v.strip() != self.orig_tags.get(k, "").strip()}
         moved = os.path.normcase(dst) != os.path.normcase(src)
         if not changed_tags and not moved:
-            QMessageBox.information(self, "Speichern", "Nichts geändert.")
+            QMessageBox.information(self, T("Speichern"), T("Nichts geändert."))
             return
         if moved and os.path.exists(dst) and os.path.normcase(os.path.realpath(dst)) != os.path.normcase(src):
-            QMessageBox.warning(self, "Speichern", f"Diese Datei gibt es schon:\n{dst}")
+            QMessageBox.warning(self, T("Speichern"), T("Diese Datei gibt es schon:\n{path}", path=dst))
             return
         msg = []
         if changed_tags:
             labels = dict(editing.TAG_FIELDS)
-            msg.append("Tags: " + ", ".join(f"{labels[k]} »{v}«" for k, v in changed_tags.items()))
+            msg.append(T("Tags:") + " " + ", ".join(f"{labels[k]} »{v}«" for k, v in changed_tags.items()))
         if moved:
-            msg.append(f"Neuer Name:\n{dst}")
-        if QMessageBox.question(self, "Änderungen speichern", "\n\n".join(msg) + "\n\nSpeichern?") != QMessageBox.Yes:
+            msg.append(T("Neuer Name:\n{path}", path=dst))
+        if QMessageBox.question(self, T("Änderungen speichern"), "\n\n".join(msg) + "\n\n" + T("Speichern?")) \
+                != QMessageBox.Yes:
             return
         self.player.stop()
         try:
@@ -688,7 +694,7 @@ class EditorWindow(QWidget):
             if moved:
                 shutil.move(src, dst)
         except Exception as exc:
-            QMessageBox.critical(self, "Speichern", f"Fehler beim Schreiben:\n{exc}")
+            QMessageBox.critical(self, T("Speichern"), T("Fehler beim Schreiben:\n{err}", err=exc))
             return
         self.retagged.emit(src, dst if moved else src)
         self.close()

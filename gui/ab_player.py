@@ -11,6 +11,8 @@ import sounddevice as sd
 from PySide6.QtCore import QObject, QTimer, Signal
 from scipy.signal import resample_poly
 
+from lang import T
+
 from engine import compare
 from engine.decode import DecodeReport, iter_blocks
 
@@ -100,7 +102,15 @@ class ABPlayer(QObject):
                 self.pair_id = pair_id
             self.loaded.emit(pair_id)
 
-        threading.Thread(target=work, daemon=True).start()
+        self._thread = threading.Thread(target=work, daemon=True)
+        self._thread.start()
+
+    def wait_idle(self, timeout: float = 15.0):
+        """Warten, bis ein laufendes Laden fertig ist -- vorher darf niemand die Dateien verschieben
+        (Windows sperrt geoeffnete Dateien)."""
+        t = getattr(self, "_thread", None)
+        if t is not None and t.is_alive():
+            t.join(timeout)
 
     def set_compare(self, res: dict | None):
         self.res = res
@@ -188,7 +198,7 @@ class ABPlayer(QObject):
                 self._resample_all(48000)
             except Exception as exc:
                 self._stream = None
-                self.error.emit(f"Audioausgabe nicht möglich: {exc}")
+                self.error.emit(T("Audioausgabe nicht möglich: {err}", err=exc))
                 return
         self._stream.start()
         self._timer.start()

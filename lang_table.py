@@ -1,0 +1,385 @@
+"""Uebersetzungen der Oberflaechentexte: deutscher Text -> (Englisch, Franzoesisch).
+Neue Texte im Code mit T("…") schreiben und hier ergaenzen; pruefen mit python tools/check_lang.py."""
+
+TABLE = {
+    # --- Tag-Felder, Editor-Engine
+    "Titel": ("Title", "Titre"),
+    "Interpret": ("Artist", "Interprète"),
+    "Album": ("Album", "Album"),
+    "Album-Interpret": ("Album artist", "Artiste de l’album"),
+    "Track": ("Track", "Piste"),
+    "Jahr": ("Year", "Année"),
+    "Genre": ("Genre", "Genre"),
+    "Tags dieses Formats können nicht geschrieben werden": ("Tags of this format cannot be written",
+                                                           "Les tags de ce format ne peuvent pas être écrits"),
+    "Teilstück ist leer": ("Part is empty", "La partie est vide"),
+    "Die Dateiendung muss der des Originals entsprechen": ("The file extension must match the original",
+                                                           "L’extension doit être celle de l’original"),
+    "Format {ext} wird zum Bearbeiten nicht unterstützt": ("Format {ext} is not supported for editing",
+                                                           "Le format {ext} n’est pas pris en charge pour l’édition"),
+    # --- Analyse (Statuszeile)
+    "Dateien werden gesammelt …": ("Collecting files …", "Collecte des fichiers …"),
+    "Index fertig: {n} Dateien": ("Index done: {n} files", "Index terminé : {n} fichiers"),
+    "Abgleich: Fingerabdrücke werden geladen …": ("Matching: loading fingerprints …",
+                                                  "Rapprochement : chargement des empreintes …"),
+    "Abgleich: Index aus {n} Dateien wird aufgebaut …": ("Matching: building index from {n} files …",
+                                                         "Rapprochement : construction de l’index de {n} fichiers …"),
+    "Abgleich fertig: {n} Dateien abgeglichen": ("Matching done: {n} files matched",
+                                                "Rapprochement terminé : {n} fichiers traités"),
+    "Feinvergleich: {n} von {total} Paaren offen": ("Fine comparison: {n} of {total} pairs pending",
+                                                    "Comparaison fine : {n} paires sur {total} en attente"),
+    "Feinvergleich fertig: {n} Paare": ("Fine comparison done: {n} pairs", "Comparaison fine terminée : {n} paires"),
+    "{n} verschobene Dateien wiedererkannt": ("{n} moved files recognised", "{n} fichiers déplacés reconnus"),
+    "Index: {total} Audiodateien, davon {todo} zu analysieren": ("Index: {total} audio files, {todo} to analyse",
+                                                                 "Index : {total} fichiers audio, dont {todo} à analyser"),
+    "Abgleich: nichts zu tun – alle Dateien sind abgeglichen": ("Matching: nothing to do – all files are matched",
+                                                                "Rapprochement : rien à faire – tous les fichiers sont traités"),
+    "Feinvergleich: Titel gleicher Bands werden gesucht …": ("Fine comparison: looking for same titles by the same band …",
+                                                             "Comparaison fine : recherche des mêmes titres d’un même groupe …"),
+    "Feinvergleich: nichts zu tun": ("Fine comparison: nothing to do", "Comparaison fine : rien à faire"),
+    "Abgleich: {n} Fingerabdrücke geladen …": ("Matching: {n} fingerprints loaded …",
+                                               "Rapprochement : {n} empreintes chargées …"),
+    "Abgleich angehalten – beim nächsten Start geht es hier weiter": (
+        "Matching paused – the next run continues from here", "Rapprochement interrompu – la prochaine fois, il reprend ici"),
+    "Index angehalten – beim nächsten Start geht es hier weiter": (
+        "Index paused – the next run continues from here", "Index interrompu – la prochaine fois, il reprend ici"),
+    "Feinvergleich angehalten – beim nächsten Start geht es hier weiter": (
+        "Fine comparison paused – the next run continues from here",
+        "Comparaison fine interrompue – la prochaine fois, elle reprend ici"),
+    "noch ca. {t}": ("approx. {t} left", "encore env. {t}"),
+    "Abgleich: {done} von {total} Dateien": ("Matching: {done} of {total} files", "Rapprochement : {done} fichiers sur {total}"),
+    "Index: {done} von {total} Dateien": ("Index: {done} of {total} files", "Index : {done} fichiers sur {total}"),
+    "Feinvergleich: {done} von {total} Paaren": ("Fine comparison: {done} of {total} pairs",
+                                                 "Comparaison fine : {done} paires sur {total}"),
+    "Phase 1 von 3: Index": ("Phase 1 of 3: Index", "Phase 1 sur 3 : Index"),
+    "Phase 2 von 3: Abgleich": ("Phase 2 of 3: Matching", "Phase 2 sur 3 : Rapprochement"),
+    "Phase 3 von 3: Feinvergleich": ("Phase 3 of 3: Fine comparison", "Phase 3 sur 3 : Comparaison fine"),
+    # --- Player
+    "Audioausgabe nicht möglich: {err}": ("Audio output not possible: {err}", "Sortie audio impossible : {err}"),
+    "Ausschnitt ist leer": ("Selection is empty", "La sélection est vide"),
+    "Ausschnitt nicht lesbar: {err}": ("Selection not readable: {err}", "Sélection illisible : {err}"),
+    # --- Info-Fenster
+    "Über {app} {version}": ("About {app} {version}", "À propos de {app} {version}"),
+    "Über {app}": ("About {app}", "À propos de {app}"),
+    "Über {app} …": ("About {app} …", "À propos de {app} …"),
+    "Schließen": ("Close", "Fermer"),
+    "Version {version} · Audio-Dublettenfinder": ("Version {version} · Audio duplicate finder",
+                                                  "Version {version} · Détecteur de doublons audio"),
+    "Tooltipps": ("Tips", "Astuces"),
+    "Spenden via PayPal": ("Donate via PayPal", "Faire un don via PayPal"),
+    # --- Klappliste
+    "Keine {noun}": ("No {noun}", "Aucun(e) {noun}"),
+    "{k} von {n} {noun}": ("{k} of {n} {noun}", "{k} sur {n} {noun}"),
+    # --- Vergleichsansicht
+    "Paar in der Liste wählen": ("Select a pair in the list", "Choisissez une paire dans la liste"),
+    "nicht in der anderen Datei": ("not in the other file", "absent de l’autre fichier"),
+    "Übereinstimmung {s}": ("similarity {s}", "concordance {s}"),
+    # --- Editor
+    "{n} Teilstücke speichern": ("Save {n} parts", "Enregistrer {n} parties"),
+    "Teil": ("Part", "Partie"),
+    "Bereich": ("Range", "Plage"),
+    "Dauer": ("Length", "Durée"),
+    "Dateiname": ("File name", "Nom du fichier"),
+    "Bearbeiten – {name}": ("Edit – {name}", "Éditer – {name}"),
+    "Schnittpunkt am Cursor (S)": ("Split at cursor (S)", "Couper au curseur (S)"),
+    "Auswahl entfernen (Entf)": ("Remove selection (Del)", "Retirer la sélection (Suppr)"),
+    "Rückgängig": ("Undo", "Annuler"),
+    "Alles zurücksetzen": ("Reset all", "Tout réinitialiser"),
+    "Ganzer Track": ("Whole track", "Morceau entier"),
+    "Zielordner …": ("Target folder …", "Dossier cible …"),
+    "Original nicht löschen/überschreiben": ("Do not delete/overwrite the original",
+                                             "Ne pas supprimer/écraser l’original"),
+    "Normalerweise wird das Original nach dem Schneiden als »(Original) Name« in den Windows-Papierkorb gelegt.\n"
+    "Mit Häkchen bleibt es unter diesem Namen zusätzlich im Originalordner.\n"
+    "Nur Tags/Name geändert: die Datei selbst wird angepasst.": (
+        "Normally the original is moved to the Windows recycle bin as »(Original) name« after cutting.\n"
+        "When ticked, it additionally stays in the original folder under that name.\n"
+        "Only tags/name changed: the file itself is updated.",
+        "Normalement, après la coupe, l’original part dans la corbeille Windows sous »(Original) nom«.\n"
+        "Coché, il reste en plus dans le dossier d’origine sous ce nom.\n"
+        "Seuls les tags/le nom changent : le fichier lui-même est mis à jour."),
+    "Speichern": ("Save", "Enregistrer"),
+    "{kept} Teilstück(e) · {splits} Schnittpunkt(e) · {sec} s werden entfernt (nicht gespeichert)": (
+        "{kept} part(s) · {splits} split point(s) · {sec} s will be removed (not saved)",
+        "{kept} partie(s) · {splits} point(s) de coupe · {sec} s seront retirées (non enregistrées)"),
+    "Änderungen speichern": ("Save changes", "Enregistrer les modifications"),
+    "Zielordner wählen": ("Choose target folder", "Choisir le dossier cible"),
+    "Zielordner: {path}": ("Target folder: {path}", "Dossier cible : {path}"),
+    "Wellenform wird geladen …": ("Loading waveform …", "Chargement de la forme d’onde …"),
+    "Schnitt {k}": ("Cut {k}", "Coupe {k}"),
+    "Klick = Cursor · Ziehen = Auswahl · Mausrad = Zoom · Umschalt+Rad = verschieben · Leertaste = ab Cursor "
+    "abspielen · S = Schnittpunkt · Entf = Auswahl entfernen · Strg+Z = rückgängig": (
+        "Click = cursor · Drag = selection · Wheel = zoom · Shift+wheel = scroll · Space = play from cursor · "
+        "S = split point · Del = remove selection · Ctrl+Z = undo",
+        "Clic = curseur · Glisser = sélection · Molette = zoom · Maj+molette = défiler · Espace = lire depuis le "
+        "curseur · S = point de coupe · Suppr = retirer la sélection · Ctrl+Z = annuler"),
+    "ab Cursor": ("from cursor", "depuis le curseur"),
+    "Auswahl in Schleife": ("Loop selection", "Sélection en boucle"),
+    "Auswahl {a} – {b} ({len} s)": ("Selection {a} – {b} ({len} s)", "Sélection {a} – {b} ({len} s)"),
+    "Cursor {t}": ("Cursor {t}", "Curseur {t}"),
+    "komplett entfernt": ("removed completely", "entièrement retirée"),
+    "Haken entfernen: dieses Teilstück nicht speichern (wird in der Wellenform rot als entfernt markiert)": (
+        "Untick: do not save this part (marked red as removed in the waveform)",
+        "Décocher : ne pas enregistrer cette partie (marquée en rouge comme retirée)"),
+    "1 gekürzte Datei speichern": ("Save 1 shortened file", "Enregistrer 1 fichier raccourci"),
+    "1 Datei speichern": ("Save 1 file", "Enregistrer 1 fichier"),
+    "Ordner wählen": ("Choose folder", "Choisir le dossier"),
+    "Abbrechen": ("Cancel", "Annuler"),
+    "Suchen in:": ("Look in:", "Regarder dans :"),
+    "Ordner:": ("Folder:", "Dossier :"),
+    "Dateityp:": ("File type:", "Type de fichier :"),
+    "Zwei Teilstücke haben denselben Dateinamen.": ("Two parts have the same file name.",
+                                                    "Deux parties ont le même nom de fichier."),
+    "Teil {i}: {name}  ({sec} s)": ("Part {i}: {name}  ({sec} s)", "Partie {i} : {name}  ({sec} s)"),
+    "Das Original wird in »{name}« umbenannt und bleibt im Originalordner.": (
+        "The original is renamed to »{name}« and stays in the original folder.",
+        "L’original est renommé »{name}« et reste dans le dossier d’origine."),
+    "Das Original wird in »{name}« umbenannt und wandert in den Windows-Papierkorb.": (
+        "The original is renamed to »{name}« and moved to the Windows recycle bin.",
+        "L’original est renommé »{name}« et part dans la corbeille Windows."),
+    "Dateiname fehlt.": ("File name missing.", "Nom de fichier manquant."),
+    "Nichts geändert.": ("Nothing changed.", "Rien n’a changé."),
+    "Diese Datei gibt es schon:\n{path}": ("This file already exists:\n{path}", "Ce fichier existe déjà :\n{path}"),
+    "Neuer Name:\n{path}": ("New name:\n{path}", "Nouveau nom :\n{path}"),
+    "wird entfernt": ("will be removed", "sera retiré"),
+    "Bearbeiten": ("Edit", "Éditer"),
+    "Nicht lesbar: {err}": ("Not readable: {err}", "Illisible : {err}"),
+    "Teil {i}": ("Part {i}", "Partie {i}"),
+    "speichern": ("save", "enregistrer"),
+    "weglassen": ("leave out", "omettre"),
+    "Alle Dateien": ("All files", "Tous les fichiers"),
+    "Teil {i}: Dateiname fehlt.": ("Part {i}: file name missing.", "Partie {i} : nom de fichier manquant."),
+    "Speichern?": ("Save?", "Enregistrer ?"),
+    "Fehler beim Schreiben:\n{err}": ("Error while writing:\n{err}", "Erreur d’écriture :\n{err}"),
+    "MP3 wird ohne Neukodierung geschnitten (Schnitte rasten auf ~26 ms ein)": (
+        "MP3 is cut without re-encoding (cuts snap to ~26 ms)",
+        "Le MP3 est coupé sans réencodage (les coupes s’alignent sur ~26 ms)"),
+    "Diese Dateien gibt es schon:": ("These files already exist:", "Ces fichiers existent déjà :"),
+    "Tags:": ("Tags:", "Tags :"),
+    "Audiodateien": ("Audio files", "Fichiers audio"),
+    # --- Hauptfenster
+    "Offen": ("Open", "Ouvert"),
+    "Kein Duplikat": ("Not a duplicate", "Pas un doublon"),
+    "Alle": ("All", "Tous"),
+    "{n} bearbeitete Datei(en) neu bewertet": ("{n} edited file(s) re-evaluated", "{n} fichier(s) édité(s) réévalué(s)"),
+    "Am Ziel liegt schon eine Datei:\n{path}": ("A file already exists at the destination:\n{path}",
+                                                "Un fichier existe déjà à la destination :\n{path}"),
+    "Ordner hinzufügen …": ("Add folder …", "Ajouter un dossier …"),
+    "Ordner wählen und analysieren (auch per Drag & Drop ins Fenster)": (
+        "Choose a folder and analyse it (also by drag & drop into the window)",
+        "Choisir un dossier et l’analyser (aussi par glisser-déposer dans la fenêtre)"),
+    "Alle bekannten Ordner aktualisieren und die drei Phasen abarbeiten:\n1 Index (Fingerabdruck je Datei) · "
+    "2 Abgleich · 3 Feinvergleich.\nNach einem Abbruch oder Absturz geht es dort weiter, wo es aufgehört hat.": (
+        "Update all known folders and run the three phases:\n1 Index (fingerprint per file) · 2 Matching · "
+        "3 Fine comparison.\nAfter an interruption or crash it continues where it left off.",
+        "Mettre à jour tous les dossiers connus et exécuter les trois phases :\n1 Index (empreinte par fichier) · "
+        "2 Rapprochement · 3 Comparaison fine.\nAprès une interruption ou un plantage, il reprend là où il s’était arrêté."),
+    "Tempo/Tonhöhe": ("Tempo/pitch", "Tempo/hauteur"),
+    "Auch schneller/langsamer abgespielte und in der Tonhöhe verschobene Fassungen suchen (±10 %).\n"
+    "Der Abgleich dauert damit etwa 20-mal so lange.": (
+        "Also look for versions played faster/slower or shifted in pitch (±10 %).\n"
+        "Matching then takes about 20 times as long.",
+        "Chercher aussi les versions jouées plus vite/lentement ou transposées (±10 %).\n"
+        "Le rapprochement prend alors environ 20 fois plus de temps."),
+    "Gleiche Titel": ("Same titles", "Mêmes titres"),
+    "Dateien gleicher Band mit gleichem Titel zusätzlich direkt vergleichen.\nFindet andere Aufnahmen "
+    "(live, neu eingespielt) und alte Aufnahmen,\nderen Klangschlüssel nicht greifen.": (
+        "Additionally compare files of the same band with the same title directly.\nFinds other recordings "
+        "(live, re-recorded) and old recordings\nwhose sound keys do not match.",
+        "Comparer aussi directement les fichiers d’un même groupe portant le même titre.\nTrouve d’autres "
+        "enregistrements (live, réenregistrés) et d’anciens enregistrements\ndont les clés sonores ne correspondent pas."),
+    "Suchen (Band, Titel, Album, Pfad) …": ("Search (band, title, album, path) …", "Rechercher (groupe, titre, album, chemin) …"),
+    "Alle Arten": ("All types", "Tous les types"),
+    "Arten": ("types", "types"),
+    "Datei {side} in den Windows-Papierkorb legen (Strg+Z holt sie zurück)": (
+        "Move file {side} to the Windows recycle bin (Ctrl+Z brings it back)",
+        "Mettre le fichier {side} dans la corbeille Windows (Ctrl+Z le récupère)"),
+    "Beide Dateien behalten – das Paar verschwindet aus der Liste „Offen“ und taucht nicht wieder auf "
+    "(Taste N, Strg+Z macht es rückgängig)": (
+        "Keep both files – the pair leaves the “Open” list and will not show up again (key N, Ctrl+Z undoes it)",
+        "Garder les deux fichiers – la paire quitte la liste « Ouvert » et ne réapparaîtra plus "
+        "(touche N, Ctrl+Z annule)"),
+    "Wieder in die Liste": ("Back to the list", "Remettre dans la liste"),
+    "Dieses Paar war als „Kein Duplikat“ markiert – zurück in die Liste „Offen“ holen": (
+        "This pair was marked “Not a duplicate” – bring it back to the “Open” list",
+        "Cette paire était marquée « Pas un doublon » – la remettre dans la liste « Ouvert »"),
+    "Abspielen / Pause (Leertaste)": ("Play / pause (space)", "Lecture / pause (espace)"),
+    "Ordner von {side}": ("Folder of {side}", "Dossier de {side}"),
+    "Ordner von {side} im Explorer öffnen, die Datei ist markiert": (
+        "Open the folder of {side} in Explorer with the file selected",
+        "Ouvrir le dossier de {side} dans l’Explorateur, fichier sélectionné"),
+    "Leertaste = Abspielen/Pause · Tab = A/B umschalten · Klick in die Welle = springen · Mausrad = Zoom · "
+    "Doppelklick = alles · Rechtsklick = bearbeiten · Strg+Z = rückgängig": (
+        "Space = play/pause · Tab = switch A/B · Click in waveform = jump · Wheel = zoom · Double-click = all · "
+        "Right-click = edit · Ctrl+Z = undo",
+        "Espace = lecture/pause · Tab = basculer A/B · Clic dans l’onde = sauter · Molette = zoom · "
+        "Double-clic = tout · Clic droit = éditer · Ctrl+Z = annuler"),
+    "&Datei": ("&File", "&Fichier"),
+    "Datenbank öffnen …": ("Open database …", "Ouvrir une base …"),
+    "Neue Datenbank …": ("New database …", "Nouvelle base …"),
+    "Nicht lesbare Dateien …": ("Unreadable files …", "Fichiers illisibles …"),
+    "Abgleich und Feinvergleich neu berechnen": ("Recalculate matching and fine comparison",
+                                                 "Recalculer rapprochement et comparaison fine"),
+    "Index bleibt erhalten; offene Paare werden neu gesucht (Prüfstand bleibt).": (
+        "The index is kept; open pairs are searched again (review status is kept).",
+        "L’index est conservé ; les paires ouvertes sont recherchées à nouveau (le statut reste)."),
+    "Beenden": ("Exit", "Quitter"),
+    "&Bearbeiten": ("&Edit", "É&dition"),
+    "&Hilfe": ("&Help", "&Aide"),
+    "Nach Updates suchen": ("Check for updates", "Rechercher des mises à jour"),
+    "Einmal am Tag auf GitHub nachsehen, ob es eine neue Version gibt": (
+        "Check GitHub once a day for a new version", "Vérifier une fois par jour sur GitHub s’il existe une nouvelle version"),
+    "{n} von {total} Paaren": ("{n} of {total} pairs", "{n} paires sur {total}"),
+    "Ordner mit Musik wählen": ("Choose a music folder", "Choisir un dossier de musique"),
+    "lädt …": ("loading …", "chargement …"),
+    "Papierkorb: {name}": ("Recycle bin: {name}", "Corbeille : {name}"),
+    "Neubewertung der bearbeiteten Datei läuft …": ("Re-evaluating the edited file …",
+                                                    "Réévaluation du fichier édité en cours …"),
+    "Neubewertung: {n} bearbeitete Datei(en) werden analysiert …": (
+        "Re-evaluation: analysing {n} edited file(s) …", "Réévaluation : analyse de {n} fichier(s) édité(s) …"),
+    "Bearbeiten: {name}": ("Edit: {name}", "Édition : {name}"),
+    "Tags/Name: {name}": ("Tags/name: {name}", "Tags/nom : {name}"),
+    "Gespeichert: {name}": ("Saved: {name}", "Enregistré : {name}"),
+    "Datenbank öffnen": ("Open database", "Ouvrir une base"),
+    "FlacDup-Datenbank (*.db);;Alle Dateien (*)": ("FlacDup database (*.db);;All files (*)",
+                                                   "Base FlacDup (*.db);;Tous les fichiers (*)"),
+    "Neue Datenbank": ("New database", "Nouvelle base"),
+    "FlacDup-Datenbank (*.db)": ("FlacDup database (*.db)", "Base FlacDup (*.db)"),
+    "Update {v} verfügbar": ("Update {v} available", "Mise à jour {v} disponible"),
+    "Version {v} steht auf GitHub bereit – klicken für Download": (
+        "Version {v} is available on GitHub – click to download",
+        "La version {v} est disponible sur GitHub – cliquer pour télécharger"),
+    "Download-Seite öffnen": ("Open download page", "Ouvrir la page de téléchargement"),
+    "Diese Version ausblenden": ("Hide this version", "Masquer cette version"),
+    "Nicht mehr nach Updates suchen": ("Stop checking for updates", "Ne plus rechercher de mises à jour"),
+    "Analyse fortsetzen": ("Continue analysis", "Poursuivre l’analyse"),
+    "Anhalten": ("Stop", "Arrêter"),
+    "Art:": ("Type:", "Type :"),
+    "Status:": ("Status:", "Statut :"),
+    "Abspielen": ("Play", "Lecture"),
+    "Taste {side} – an der entsprechenden Stelle auf {side} umschalten (Tab wechselt)": (
+        "Key {side} – switch to {side} at the matching position (Tab toggles)",
+        "Touche {side} – basculer sur {side} au même endroit (Tab alterne)"),
+    "{files} Dateien im Index, {pairs} Paare": ("{files} files in the index, {pairs} pairs",
+                                                "{files} fichiers dans l’index, {pairs} paires"),
+    "Es läuft bereits eine Analyse.": ("An analysis is already running.", "Une analyse est déjà en cours."),
+    "Wird angehalten …": ("Stopping …", "Arrêt en cours …"),
+    "Analyse abgebrochen:\n{err}\n\nDetails: {log}": ("Analysis aborted:\n{err}\n\nDetails: {log}",
+                                                      "Analyse interrompue :\n{err}\n\nDétails : {log}"),
+    "Alle offenen Paare verwerfen und Abgleich sowie Feinvergleich beim nächsten Lauf neu berechnen?\n"
+    "Der Index (Phase 1) bleibt.": (
+        "Discard all open pairs and recalculate matching and fine comparison on the next run?\n"
+        "The index (phase 1) is kept.",
+        "Abandonner toutes les paires ouvertes et recalculer rapprochement et comparaison fine au prochain passage ?\n"
+        "L’index (phase 1) est conservé."),
+    "{side} in den Papierkorb legen?\n\n{path}": ("Move {side} to the recycle bin?\n\n{path}",
+                                                  "Mettre {side} à la corbeille ?\n\n{path}"),
+    "Rückgängig: {what}": ("Undo: {what}", "Annuler : {what}"),
+    "Rückgängig gemacht: {what}": ("Undone: {what}", "Annulé : {what}"),
+    "Datei nicht gefunden:\n{path}": ("File not found:\n{path}", "Fichier introuvable :\n{path}"),
+    "beste Übereinstimmung mit dem Partner {p} %": ("best match with the partner {p} %",
+                                                    "meilleure concordance avec le partenaire {p} %"),
+    "Abgleich mit dem übrigen Archiv beim nächsten „Analyse fortsetzen“": (
+        "matching against the rest of the archive with the next “Continue analysis”",
+        "rapprochement avec le reste de la collection au prochain « Poursuivre l’analyse »"),
+    "Bitte erst die laufende Analyse anhalten.": ("Please stop the running analysis first.",
+                                                  "Veuillez d’abord arrêter l’analyse en cours."),
+    "Datei nicht lesbar: {err}": ("File not readable: {err}", "Fichier illisible : {err}"),
+    "{n} Dateien ohne Fingerabdruck": ("{n} files without fingerprint", "{n} fichiers sans empreinte"),
+    "{n} nicht abgeglichen": ("{n} not matched", "{n} non rapprochés"),
+    "{n} Paare ohne Feinvergleich": ("{n} pairs without fine comparison", "{n} paires sans comparaison fine"),
+    "Noch keine Ordner – „Ordner hinzufügen …“ oder Ordner ins Fenster ziehen": (
+        "No folders yet – “Add folder …” or drag folders into the window",
+        "Pas encore de dossiers – « Ajouter un dossier … » ou glisser des dossiers dans la fenêtre"),
+    "Angehalten – „Analyse fortsetzen“ macht an derselben Stelle weiter": (
+        "Stopped – “Continue analysis” picks up at the same point",
+        "Arrêté – « Poursuivre l’analyse » reprend au même endroit"),
+    "Pause": ("Pause", "Pause"),
+    "„Kein Duplikat“": ("“Not a duplicate”", "« Pas un doublon »"),
+    "„Wieder in die Liste“": ("“Back to the list”", "« Remettre dans la liste »"),
+    "Konnte nicht gelöscht werden:\n{err}": ("Could not be deleted:\n{err}", "Suppression impossible :\n{err}"),
+    "Nicht mehr im Papierkorb:\n{path}": ("No longer in the recycle bin:\n{path}", "N’est plus dans la corbeille :\n{path}"),
+    "Konnte nicht rückgängig gemacht werden:\n{err}": ("Could not be undone:\n{err}", "Annulation impossible :\n{err}"),
+    "Die Datei gibt es schon – bitte einen neuen Namen wählen.": ("The file already exists – please choose a new name.",
+                                                                 "Le fichier existe déjà – choisissez un autre nom."),
+    "{n} nicht lesbar": ("{n} unreadable", "{n} illisibles"),
+    "{n} Kanäle": ("{n} channels", "{n} canaux"),
+    "Original nicht mehr im Papierkorb:\n{path}": ("Original no longer in the recycle bin:\n{path}",
+                                                   "L’original n’est plus dans la corbeille :\n{path}"),
+    "1 Datei im Ordner": ("1 file in folder", "1 fichier dans le dossier"),
+    "{n} Dateien im Ordner": ("{n} files in folder", "{n} fichiers dans le dossier"),
+    "{p} % gleich klingend": ("{p} % sounds the same", "{p} % sonne pareil"),
+    "offen:": ("pending:", "en attente :"),
+    "Packrate {p}": ("Compression {p}", "Compression {p}"),
+    "Geschwindigkeit": ("Speed", "Vitesse"),
+    "Tempo": ("Tempo", "Tempo"),
+    "Tonhöhe": ("Pitch", "Hauteur"),
+    "HT": ("st", "dt"),
+    # --- Liste
+    "Band": ("Band", "Groupe"),
+    "Titel A": ("Title A", "Titre A"),
+    "Titel B": ("Title B", "Titre B"),
+    "Album A": ("Album A", "Album A"),
+    "Album B": ("Album B", "Album B"),
+    "Art": ("Type", "Type"),
+    "Gleich": ("Same", "Pareil"),
+    "Länge A": ("Length A", "Durée A"),
+    "Länge B": ("Length B", "Durée B"),
+    "Ordner A": ("Folder A", "Dossier A"),
+    "Ordner B": ("Folder B", "Dossier B"),
+    "Interpret weicht ab:\nA: {a}\nB: {b}": ("Artist differs:\nA: {a}\nB: {b}", "Interprète différent :\nA : {a}\nB : {b}"),
+    "Median-Übereinstimmung {m}": ("Median similarity {m}", "Concordance médiane {m}"),
+    "Haupttitel weicht ab (ohne Klammerzusätze):\nA: {a}\nB: {b}": (
+        "Main title differs (without bracketed additions):\nA: {a}\nB: {b}",
+        "Titre principal différent (sans ajouts entre parenthèses) :\nA : {a}\nB : {b}"),
+    "Gleich klingend: A zu {a} %, B zu {b} %": ("Sounds the same: A {a} %, B {b} %", "Sonne pareil : A {a} %, B {b} %"),
+    "Identisch": ("Identical", "Identique"),
+    "Ausschnitt": ("Excerpt", "Extrait"),
+    "Gemeinsame Teile": ("Shared parts", "Parties communes"),
+    "Andere Aufnahme": ("Other recording", "Autre enregistrement"),
+    "Schwach": ("Weak", "Faible"),
+    "Noch nicht verglichen": ("Not compared yet", "Pas encore comparé"),
+    "Beide Dateien enthalten dieselbe Aufnahme fast vollständig": (
+        "Both files contain the same recording almost completely",
+        "Les deux fichiers contiennent presque entièrement le même enregistrement"),
+    "Eine Datei steckt (fast) vollständig in der anderen – z. B. Radio-Edit, gekürzte Fassung": (
+        "One file is (almost) completely contained in the other – e.g. radio edit, shortened version",
+        "Un fichier est (presque) entièrement contenu dans l’autre – p. ex. radio edit, version raccourcie"),
+    "Dieselbe Aufnahme schneller/langsamer oder in anderer Tonhöhe": (
+        "The same recording faster/slower or in a different pitch",
+        "Le même enregistrement plus rapide/lent ou à une autre hauteur"),
+    "Gemeinsame Abschnitte – z. B. Remix, Extended Mix, Medley": (
+        "Shared sections – e.g. remix, extended mix, medley", "Passages communs – p. ex. remix, version longue, medley"),
+    "Gleicher Song, aber andere Aufnahme (live, neu eingespielt, andere Sprache)": (
+        "Same song, but a different recording (live, re-recorded, other language)",
+        "Même morceau, mais autre enregistrement (live, réenregistré, autre langue)"),
+    "Nur kurze oder überlagerte Gemeinsamkeiten – meist kein Duplikat": (
+        "Only short or overlaid similarities – usually not a duplicate",
+        "Seulement des ressemblances courtes ou superposées – en général pas un doublon"),
+    "Der Feinvergleich (Phase 3) für dieses Paar läuft noch": (
+        "The fine comparison (phase 3) for this pair is still pending",
+        "La comparaison fine (phase 3) de cette paire est encore en cours"),
+    # --- Nicht lesbare Dateien
+    "Nicht lesbare Dateien": ("Unreadable files", "Fichiers illisibles"),
+    "Im Explorer zeigen": ("Show in Explorer", "Afficher dans l’Explorateur"),
+    "Öffnet den Ordner und markiert die Datei (auch per Doppelklick)": (
+        "Opens the folder with the file selected (also by double-click)",
+        "Ouvre le dossier, fichier sélectionné (aussi par double-clic)"),
+    "Erneut einlesen": ("Read again", "Relire"),
+    "Gewählte Dateien beim nächsten „Analyse fortsetzen“ noch einmal analysieren": (
+        "Analyse the selected files again with the next “Continue analysis”",
+        "Analyser à nouveau les fichiers choisis au prochain « Poursuivre l’analyse »"),
+    "Datei": ("File", "Fichier"),
+    "Ordner": ("Folder", "Dossier"),
+    "Grund": ("Reason", "Raison"),
+    "{n} Datei(en) ließen sich nicht lesen und fehlen deshalb im Abgleich.": (
+        "{n} file(s) could not be read and are therefore missing from matching.",
+        "{n} fichier(s) n’ont pas pu être lus et manquent donc au rapprochement."),
+    "Alle Dateien ließen sich lesen.": ("All files could be read.", "Tous les fichiers ont pu être lus."),
+    "{n} Datei(en) werden beim nächsten „Analyse fortsetzen“ erneut eingelesen.": (
+        "{n} file(s) will be read again with the next “Continue analysis”.",
+        "{n} fichier(s) seront relus au prochain « Poursuivre l’analyse »."),
+    "Noch {n} weitere nicht lesbar.": ("{n} more still unreadable.", "Encore {n} autre(s) illisible(s)."),
+    "Unerwarteter Fehler:\n{err}\n\nDetails: {log}": ("Unexpected error:\n{err}\n\nDetails: {log}",
+                                                      "Erreur inattendue :\n{err}\n\nDétails : {log}"),
+}

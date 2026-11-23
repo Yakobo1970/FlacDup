@@ -12,7 +12,7 @@
 ; Bei neuen Versionen AppId beibehalten (sonst gilt es als anderes Programm), nur AppVersion anheben.
 
 #define AppName "FlacDup"
-#define AppVersion "1.0.0"
+#define AppVersion "1.1.0"
 #define AppPublisher "yakobo1970"
 #define AppURL "https://www.undabtanzbar.de/software/flacdup/"
 #define AppExeName "FlacDup.exe"
@@ -43,8 +43,13 @@ ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
 
 [Languages]
-Name: "german"; MessagesFile: "compiler:Languages\German.isl"
-Name: "english"; MessagesFile: "compiler:Default.isl"
+; Die Namen sind zugleich die Sprachcodes, die FlacDup aus der Registry liest (Wahl beim Setup)
+Name: "de"; MessagesFile: "compiler:Languages\German.isl"
+Name: "en"; MessagesFile: "compiler:Default.isl"
+Name: "fr"; MessagesFile: "compiler:Languages\French.isl"
+
+[Registry]
+Root: HKCU; Subkey: "Software\Yakobo\FlacDup"; ValueType: string; ValueName: "Language"; ValueData: "{language}"; Flags: uninsdeletekey
 
 [Tasks]
 Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"

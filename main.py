@@ -22,12 +22,14 @@ def main():
             pass
     app = QApplication(sys.argv)
     app.setApplicationName(APP_NAME)
-    # Deutsche Standardtexte in Qt-Dialogen ("Ja"/"Nein" statt "Yes"/"No")
+    # Qt-Standardtexte in der gewaehlten Sprache ("Ja"/"Nein", "Oui"/"Non" statt "Yes"/"No")
     from PySide6.QtCore import QLibraryInfo, QLocale, QTranslator
-    translator = QTranslator(app)
-    if translator.load(QLocale(QLocale.German), "qtbase", "_",
-                       QLibraryInfo.path(QLibraryInfo.TranslationsPath)):
-        app.installTranslator(translator)
+    from lang import LANG
+    if LANG != "en":
+        translator = QTranslator(app)
+        if translator.load(QLocale(QLocale.German if LANG == "de" else QLocale.French), "qtbase", "_",
+                           QLibraryInfo.path(QLibraryInfo.TranslationsPath)):
+            app.installTranslator(translator)
     apply_dark(app)
     if ICON_PATH.exists():
         app.setWindowIcon(QIcon(str(ICON_PATH)))
@@ -37,7 +39,8 @@ def main():
         from gui.main_window import ERROR_LOG, log_error
         from PySide6.QtWidgets import QMessageBox
         log_error("unerwarteter Fehler", value.with_traceback(tb))
-        QMessageBox.critical(None, APP_NAME, f"Unerwarteter Fehler:\n{value}\n\nDetails: {ERROR_LOG}")
+        from lang import T
+        QMessageBox.critical(None, APP_NAME, T("Unerwarteter Fehler:\n{err}\n\nDetails: {log}", err=value, log=ERROR_LOG))
 
     sys.excepthook = excepthook
     db_path = sys.argv[sys.argv.index("--db") + 1] if "--db" in sys.argv else None

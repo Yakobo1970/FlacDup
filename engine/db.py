@@ -292,3 +292,62 @@ class Database:
                 folder, filename = os.path.split(new_path)
                 self.conn.execute("UPDATE files SET path=?, folder=?, filename=? WHERE id=?",
                                   (new_path, folder, filename, fid))
+
+    def update_file_meta(self, fid: int, path: str, size: int, mtime: float, tags: dict):
+        """Nur Tags/Name geaendert: Klang und Fingerabdruck bleiben gueltig, Paare bleiben."""
+        folder, filename = os.path.split(path)
+        with self.lock, self.conn:
+            self.conn.execute(
+                "UPDATE files SET path=?, folder=?, filename=?, ext=?, size=?, mtime=?, "
+                "artist=?, title=?, album=?, year=?, track=? WHERE id=?",
+                (path, folder, filename, os.path.splitext(filename)[1].lower().lstrip("."), size, mtime,
+                 tags.get("artist"), tags.get("title"), tags.get("album"), tags.get("year"), tags.get("track"),
+                 fid))
+
+    def add_edit_pair(self, a_id: int, b_id: int) -> int:
+        """Paar aus der Neubewertung nach dem Editor (Versatz unbekannt -> Feinvergleich schaetzt ihn)."""
+        a_id, b_id = min(a_id, b_id), max(a_id, b_id)
+        with self.lock, self.conn:
+            self.conn.execute(
+                "INSERT OR IGNORE INTO pairs(a_id, b_id, votes, kind, variant, time_scale, shift_bins, "
+                "source, found_at) VALUES (?,?,0,'','',1.0,0.0,'edit',?)", (a_id, b_id, time.time()))
+            return self.conn.execute("SELECT id FROM pairs WHERE a_id=? AND b_id=?", (a_id, b_id)).fetchone()[0]
+
+    def file_id(self, path: str) -> int | None:
+        row = self.conn.execute("SELECT id FROM files WHERE path=?", (path,)).fetchone()
+        return row[0] if row else None
+
+    # ------------------------------------------------------------ Rueckgaengig
+    def snapshot_file(self, fid: int) -> dict | None:
+        """Alles zu einer Datei sichern (Eintrag, Fingerabdruck, Paare samt Pruefstand), bevor sie
+        geloescht oder ersetzt wird -- restore_snapshot stellt es unveraendert wieder her."""
+        cur = self.conn.execute("SELECT * FROM files WHERE id=?", (fid,))
+        row = cur.fetchone()
+        if row is None:
+            return None
+        cols = [d[0] for d in cur.description]
+        fp = self.conn.execute("SELECT peaks FROM fingerprints WHERE file_id=?", (fid,)).fetchone()
+        cur = self.conn.execute("SELECT * FROM pairs WHERE a_id=? OR b_id=?", (fid, fid))
+        pcols = [d[0] for d in cur.description]
+        return {"file": dict(zip(cols, row)), "fp": fp[0] if fp else None,
+                "pairs": [dict(zip(pcols, r)) for r in cur.fetchall()]}
+
+    def restore_snapshot(self, snap: dict):
+        f = snap["file"]
+        with self.lock, self.conn:
+            # ein neuer Eintrag mit demselben Pfad (z. B. gekuerzte Datei unter altem Namen) weicht
+            self.conn.execute("DELETE FROM files WHERE path=? AND id<>?", (f["path"], f["id"]))
+            self.conn.execute(f"INSERT OR REPLACE INTO files({', '.join(f)}) VALUES ({','.join('?' * len(f))})",
+                              tuple(f.values()))
+            if snap["fp"] is not None:
+                self.conn.execute("INSERT OR REPLACE INTO fingerprints VALUES (?,?)", (f["id"], snap["fp"]))
+            for p in snap["pairs"]:
+                partner = p["b_id"] if p["a_id"] == f["id"] else p["a_id"]
+                if self.conn.execute("SELECT 1 FROM files WHERE id=?", (partner,)).fetchone() is None:
+                    continue            # Partner ist inzwischen selbst weg
+                self.conn.execute(f"INSERT OR REPLACE INTO pairs({', '.join(p)}) VALUES ({','.join('?' * len(p))})",
+                                  tuple(p.values()))
+
+    def get_review(self, pair_ids: list[int]) -> dict[int, str]:
+        q = f"SELECT id, review FROM pairs WHERE id IN ({','.join('?' * len(pair_ids))})"
+        return dict(self.conn.execute(q, pair_ids).fetchall()) if pair_ids else {}
