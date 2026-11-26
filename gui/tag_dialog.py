@@ -5,8 +5,8 @@ from __future__ import annotations
 
 import os
 
-from PySide6.QtCore import QBuffer, QIODevice, QSize, Qt, Signal
-from PySide6.QtGui import QImage, QPixmap
+from PySide6.QtCore import QBuffer, QEvent, QIODevice, QSize, Qt, Signal
+from PySide6.QtGui import QImage, QKeySequence, QPixmap, QShortcut
 from PySide6.QtWidgets import (QDialog, QFileDialog, QFrame, QGridLayout, QHBoxLayout, QLabel, QLineEdit,
                                QMessageBox, QPlainTextEdit, QPushButton, QScrollArea, QToolButton,
                                QVBoxLayout, QWidget)
@@ -123,6 +123,10 @@ class TagCompareDialog(QDialog):
         self.labels: dict[str, QLabel] = {}
         self.stems: list[QLineEdit] = []
         self.arrows: dict[str, tuple[QToolButton, QToolButton]] = {}
+        # Rueckgaengig im Fenster: Zustaende aller Felder; Tippen im selben Feld zaehlt als ein Schritt
+        self._hist: list[tuple] = []
+        self._last_key = None
+        self._quiet = 0          # >0: Aenderungen gerade nicht einzeln aufzeichnen (Aktion/Wiederherstellen)
 
         outer = QVBoxLayout(self)
         area = QScrollArea()
@@ -171,6 +175,7 @@ class TagCompareDialog(QDialog):
             e = QLineEdit(stem)
             e.setProperty("orig", stem)
             e.textChanged.connect(self._update)
+            e.installEventFilter(self)
             self.stems.append(e)
             box.addWidget(e, 1)
             lab = QLabel(ext)
@@ -180,7 +185,7 @@ class TagCompareDialog(QDialog):
             w.setLayout(box)
             box.setContentsMargins(0, 0, 0, 0)
             g.addWidget(w, row, 1 + 2 * side)
-        g.addWidget(self._arrows("stem"), row, 2)
+        # bewusst ohne Pfeile und ohne Rot-Markierung: der Dateiname soll nicht nebenbei mit uebernommen werden
         row += 1
 
         # Tag-Felder
@@ -201,6 +206,7 @@ class TagCompareDialog(QDialog):
                 # Vergleichswert = Text, wie ihn das Feld zeigt (Zeilenumbrueche \r\n -> \n), sonst gaelte
                 # ein unveraenderter Liedtext als geaendert
                 e.setProperty("orig", self._text(e))
+                e.installEventFilter(self)
                 e.setReadOnly(not self.tags[side]["writable"])
                 self.fields[side][key] = e
                 g.addWidget(e, row, 1 + 2 * side)
@@ -212,16 +218,16 @@ class TagCompareDialog(QDialog):
         b_fill = QPushButton(T("Leere Felder ergänzen"))
         b_fill.setToolTip(T("Felder, die nur auf einer Seite ausgefüllt sind, auf die andere Seite übernehmen "
                             "(auch das Cover). Ausgefüllte Felder bleiben unverändert."))
-        b_fill.clicked.connect(self._fill_empty)
+        b_fill.clicked.connect(lambda: self._action(self._fill_empty))
         b_ab = QPushButton(T("Alles A → B"))
         b_ab.setToolTip(T("Alle Tags und das Cover von A nach B übernehmen (Dateiname nicht)"))
-        b_ab.clicked.connect(lambda: self._copy_all(0))
+        b_ab.clicked.connect(lambda: self._action(self._copy_all, 0))
         b_ba = QPushButton(T("Alles B → A"))
         b_ba.setToolTip(T("Alle Tags und das Cover von B nach A übernehmen (Dateiname nicht)"))
-        b_ba.clicked.connect(lambda: self._copy_all(1))
+        b_ba.clicked.connect(lambda: self._action(self._copy_all, 1))
         b_reset = QPushButton(T("Zurücksetzen"))
         b_reset.setToolTip(T("Alle Änderungen in diesem Fenster verwerfen"))
-        b_reset.clicked.connect(self._reset)
+        b_reset.clicked.connect(lambda: self._action(self._reset))
         self.lbl_sum = QLabel()
         self.btn_save = QPushButton(T("Speichern"))
         self.btn_save.setStyleSheet(GREEN_BUTTON)
@@ -238,11 +244,19 @@ class TagCompareDialog(QDialog):
         bar.addWidget(self.btn_save)
         outer.addLayout(bar)
         hint = QLabel(T("Rot = A und B weichen ab · Orange umrandet = geändert, noch nicht gespeichert · "
-                        "> übernimmt A nach B, < übernimmt B nach A"))
+                        "> übernimmt A nach B, < übernimmt B nach A · Strg+Z = rückgängig"))
         hint.setStyleSheet("color:#999")
         outer.addWidget(hint)
         self.resize(1180, 860)
         self._update()
+        self._hist = [self._state()]
+        self._sc_undo = QShortcut(QKeySequence(QKeySequence.Undo), self)
+        self._sc_undo.activated.connect(self._undo)
+        # Enter in einem Feld schliesst nur die Eingabe ab -- kein Knopf ist "Standard" (sonst loeste Enter
+        # den ersten Knopf aus, "Bild laden ...")
+        for btn in self.findChildren(QPushButton):
+            btn.setAutoDefault(False)
+            btn.setDefault(False)
 
     # ------------------------------------------------------------ Bausteine
     def _arrows(self, key: str) -> QWidget:
@@ -262,7 +276,7 @@ class TagCompareDialog(QDialog):
             sp = b.sizePolicy()
             sp.setRetainSizeWhenHidden(True)      # ausgeblendeter Pfeil laesst seinen Platz frei
             b.setSizePolicy(sp)
-            b.clicked.connect(lambda _=False, k=key, s=src: self._copy(k, s))
+            b.clicked.connect(lambda _=False, k=key, s=src: self._action(self._copy, k, s))
             dst = 1 - src
             if (key == "cover" and not self.tags[dst]["cover_writable"]) or \
                     (key not in ("cover", "stem") and not self.tags[dst]["writable"]):
@@ -271,6 +285,69 @@ class TagCompareDialog(QDialog):
             pair.append(b)
         self.arrows[key] = (pair[0], pair[1])
         return w
+
+    # ------------------------------------------------------------ Rueckgaengig im Fenster
+    def _state(self) -> tuple:
+        return (tuple(self._text(self.fields[s][k]) for s in (0, 1) for k in tagsync.KEYS),
+                tuple(e.text() for e in self.stems),
+                tuple((c.data, c.folder) for c in self.covers))
+
+    def _record(self, key=None):
+        """Aktuellen Zustand als Schritt merken; key = Feld, in dem getippt wird (fasst Tippen zusammen)."""
+        if self._quiet or not self._hist:
+            return
+        st = self._state()
+        if st == self._hist[-1]:
+            return
+        if key is not None and key == self._last_key and len(self._hist) > 1:
+            self._hist[-1] = st
+        else:
+            self._hist.append(st)
+        self._last_key = key
+
+    def _action(self, fn, *args):
+        """Knopf-Aktion (Pfeil, Alles, Ergaenzen, Zuruecksetzen) als ein Rueckgaengig-Schritt."""
+        self._quiet += 1
+        try:
+            fn(*args)
+        finally:
+            self._quiet -= 1
+        self._last_key = None
+        self._record()
+
+    def _undo(self):
+        if len(self._hist) < 2:
+            return
+        self._hist.pop()
+        texts, stems, covers = self._hist[-1]
+        self._quiet += 1
+        try:
+            i = 0
+            for s in (0, 1):
+                for k in tagsync.KEYS:
+                    e = self.fields[s][k]
+                    if self._text(e) != texts[i]:
+                        self._set_text(e, texts[i])
+                    i += 1
+            for e, t in zip(self.stems, stems):
+                if e.text() != t:
+                    e.setText(t)
+            for c, (data, folder) in zip(self.covers, covers):
+                if (c.data, c.folder) != (data, folder):
+                    c.set_data(data, folder)
+        finally:
+            self._quiet -= 1
+        self._last_key = None
+        self._update()
+
+    def eventFilter(self, obj, ev):
+        # Strg+Z in einem Feld macht den letzten Schritt im ganzen Fenster rueckgaengig (auch Pfeil-Uebernahmen)
+        if ev.type() in (QEvent.ShortcutOverride, QEvent.KeyPress) and ev.matches(QKeySequence.Undo):
+            if ev.type() == QEvent.KeyPress:
+                self._undo()
+            ev.accept()
+            return True
+        return super().eventFilter(obj, ev)
 
     @staticmethod
     def _text(e) -> str:
@@ -290,8 +367,6 @@ class TagCompareDialog(QDialog):
             c = self.covers[src]
             if self.covers[dst].writable:
                 self.covers[dst].set_data(c.data, False)
-        elif key == "stem":
-            self.stems[dst].setText(self.stems[src].text())
         elif not self.fields[dst][key].isReadOnly():
             self._set_text(self.fields[dst][key], self._text(self.fields[src][key]))
 
@@ -323,6 +398,8 @@ class TagCompareDialog(QDialog):
 
     def _update(self):
         """Abweichende Inhalte rot, Geaendertes orange umrandet; Pfeile nur dort, wo die Quelle etwas enthaelt."""
+        fw = self.focusWidget()
+        self._record(id(fw) if isinstance(fw, (QLineEdit, QPlainTextEdit)) else None)
         n = 0
         for key in tagsync.KEYS:
             vals = [self._text(self.fields[s][key]).strip() for s in (0, 1)]
@@ -332,12 +409,10 @@ class TagCompareDialog(QDialog):
                 n += changed
                 e.setStyleSheet(self._style(vals[0] != vals[1], changed))
             self._show_arrows(key, vals)
-        stems = [e.text().strip() for e in self.stems]
         for e in self.stems:
             changed = e.text() != e.property("orig")
             n += changed
-            e.setStyleSheet(self._style(stems[0] != stems[1], changed))
-        self._show_arrows("stem", stems)
+            e.setStyleSheet(self._style(False, changed))
         differ = not tagsync.same_cover(self.covers[0].data, self.covers[1].data)
         for c in self.covers:
             n += c.is_changed()
@@ -352,9 +427,10 @@ class TagCompareDialog(QDialog):
         return (f"color:{RED}; font-weight:bold;" if differ else "") + (CHANGED_STYLE if changed else "")
 
     def _show_arrows(self, key: str, vals):
-        """> nur, wenn A etwas enthaelt, < nur, wenn B etwas enthaelt."""
+        """> nur, wenn A etwas enthaelt, < nur, wenn B etwas enthaelt -- und keiner, wenn beide gleich sind."""
+        same = (vals[0] or None) == (vals[1] or None)
         for src, b in enumerate(self.arrows[key]):
-            b.setVisible(bool(vals[src]))
+            b.setVisible(bool(vals[src]) and not same)
 
     # ------------------------------------------------------------ Ergebnis
     def changes(self) -> dict[int, dict]:
