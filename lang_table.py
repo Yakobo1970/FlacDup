@@ -414,7 +414,7 @@ TABLE = {
     'Zurücksetzen': ('Reset', 'Réinitialiser'),
     'Alle Änderungen in diesem Fenster verwerfen': ('Discard all changes in this window', 'Annuler toutes les modifications de cette fenêtre'),
     'Geänderte Tags in die Dateien schreiben – mit Strg+Z im Hauptfenster rückgängig': ('Write the changed tags to the files – undo with Ctrl+Z in the main window', 'Écrire les tags modifiés dans les fichiers – annulable avec Ctrl+Z dans la fenêtre principale'),
-    'Rot = A und B weichen ab · Orange umrandet = geändert, noch nicht gespeichert · → übernimmt A nach B, ← übernimmt B nach A': ('Red = A and B differ · Orange frame = changed, not saved yet · → copies A to B, ← copies B to A', 'Rouge = A et B diffèrent · Cadre orange = modifié, pas encore enregistré · → copie A vers B, ← copie B vers A'),
+    'Rot = A und B weichen ab · Orange umrandet = geändert, noch nicht gespeichert · > übernimmt A nach B, < übernimmt B nach A': ('Red = A and B differ · Orange frame = changed, not saved yet · > copies A to B, < copies B to A', 'Rouge = A et B diffèrent · Cadre orange = modifié, pas encore enregistré · > copie A vers B, < copie B vers A'),
     'Bilder': ('Images', 'Images'),
     'A nach B übernehmen': ('Copy A to B', 'Copier A vers B'),
     'B nach A übernehmen': ('Copy B to A', 'Copier B vers A'),

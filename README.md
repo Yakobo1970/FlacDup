@@ -46,7 +46,7 @@ dem Coverbild der Datei (eingebettet oder Ordnerbild); beim Darüberfahren wird 
 
 **Tag-Abgleich:** Rechtsklick in die Liste öffnet ein Fenster mit allen Tags von A und B nebeneinander –
 Cover (mit Größe und Format), Titel, Interpret, Album, Album-Interpret, Track, CD, Jahr, Original-Jahr, Genre, Komponist,
-Kommentar, Liedtext und Dateiname. Abweichende Felder stehen rot, → und ← übernehmen ein Feld auf die
+Kommentar, Liedtext und Dateiname. Abweichende Inhalte stehen rot, > und < übernehmen ein Feld auf die
 andere Seite, „Leere Felder ergänzen“ füllt Lücken gegenseitig auf. Gespeichert wird nur, was sich geändert
 hat (MP3/WAV/AIFF, FLAC/OGG, M4A; WMA ohne Cover) – mit Strg+Z rückgängig. Weichen Interpret oder
 Haupttitel ab, stehen auch die Dateinamen über den Wellen rot.

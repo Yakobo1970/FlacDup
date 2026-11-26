@@ -122,6 +122,7 @@ class TagCompareDialog(QDialog):
         self.fields: list[dict[str, QLineEdit | QPlainTextEdit]] = [{}, {}]
         self.labels: dict[str, QLabel] = {}
         self.stems: list[QLineEdit] = []
+        self.arrows: dict[str, tuple[QToolButton, QToolButton]] = {}
 
         outer = QVBoxLayout(self)
         area = QScrollArea()
@@ -237,7 +238,7 @@ class TagCompareDialog(QDialog):
         bar.addWidget(self.btn_save)
         outer.addLayout(bar)
         hint = QLabel(T("Rot = A und B weichen ab · Orange umrandet = geändert, noch nicht gespeichert · "
-                        "→ übernimmt A nach B, ← übernimmt B nach A"))
+                        "> übernimmt A nach B, < übernimmt B nach A"))
         hint.setStyleSheet("color:#999")
         outer.addWidget(hint)
         self.resize(1180, 860)
@@ -249,17 +250,26 @@ class TagCompareDialog(QDialog):
         lay = QVBoxLayout(w) if key in ("cover", "lyrics") else QHBoxLayout(w)
         lay.setContentsMargins(0, 0, 0, 0)
         lay.setSpacing(2)
-        for src, text, tip in ((0, "→", T("A nach B übernehmen")), (1, "←", T("B nach A übernehmen"))):
+        pair = []
+        for src, text, tip in ((0, ">", T("A nach B übernehmen")), (1, "<", T("B nach A übernehmen"))):
             b = QToolButton()
             b.setText(text)
             b.setToolTip(tip)
             b.setFixedSize(28, 24)
+            f = b.font()
+            f.setBold(True)
+            b.setFont(f)
+            sp = b.sizePolicy()
+            sp.setRetainSizeWhenHidden(True)      # ausgeblendeter Pfeil laesst seinen Platz frei
+            b.setSizePolicy(sp)
             b.clicked.connect(lambda _=False, k=key, s=src: self._copy(k, s))
             dst = 1 - src
             if (key == "cover" and not self.tags[dst]["cover_writable"]) or \
                     (key not in ("cover", "stem") and not self.tags[dst]["writable"]):
                 b.setEnabled(False)
             lay.addWidget(b)
+            pair.append(b)
+        self.arrows[key] = (pair[0], pair[1])
         return w
 
     @staticmethod
@@ -312,30 +322,39 @@ class TagCompareDialog(QDialog):
             c.set_data(c.orig, c.orig_folder)
 
     def _update(self):
+        """Abweichende Inhalte rot, Geaendertes orange umrandet; Pfeile nur dort, wo die Quelle etwas enthaelt."""
         n = 0
         for key in tagsync.KEYS:
-            a, b = (self._text(self.fields[s][key]).strip() for s in (0, 1))
-            self._mark(self.labels[key], a != b)
+            vals = [self._text(self.fields[s][key]).strip() for s in (0, 1)]
             for s in (0, 1):
                 e = self.fields[s][key]
                 changed = self._text(e) != e.property("orig")
                 n += changed
-                e.setStyleSheet(CHANGED_STYLE if changed else "")
-        self._mark(self.labels["cover"], not tagsync.same_cover(self.covers[0].data, self.covers[1].data))
-        self._mark(self.labels["stem"], self.stems[0].text().strip() != self.stems[1].text().strip())
+                e.setStyleSheet(self._style(vals[0] != vals[1], changed))
+            self._show_arrows(key, vals)
+        stems = [e.text().strip() for e in self.stems]
         for e in self.stems:
             changed = e.text() != e.property("orig")
             n += changed
-            e.setStyleSheet(CHANGED_STYLE if changed else "")
+            e.setStyleSheet(self._style(stems[0] != stems[1], changed))
+        self._show_arrows("stem", stems)
+        differ = not tagsync.same_cover(self.covers[0].data, self.covers[1].data)
         for c in self.covers:
             n += c.is_changed()
             c._show()
+            c.info.setStyleSheet(f"color:{RED}; font-weight:bold;" if differ else "color:#999")
+        self._show_arrows("cover", [c.data for c in self.covers])
         self.lbl_sum.setText(T("{n} Änderung(en)", n=n) if n else "")
         self.btn_save.setEnabled(n > 0)
 
     @staticmethod
-    def _mark(lab: QLabel, differ: bool):
-        lab.setStyleSheet(f"color:{RED}; font-weight:bold;" if differ else "")
+    def _style(differ: bool, changed: bool) -> str:
+        return (f"color:{RED}; font-weight:bold;" if differ else "") + (CHANGED_STYLE if changed else "")
+
+    def _show_arrows(self, key: str, vals):
+        """> nur, wenn A etwas enthaelt, < nur, wenn B etwas enthaelt."""
+        for src, b in enumerate(self.arrows[key]):
+            b.setVisible(bool(vals[src]))
 
     # ------------------------------------------------------------ Ergebnis
     def changes(self) -> dict[int, dict]:

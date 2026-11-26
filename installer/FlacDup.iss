@@ -12,7 +12,7 @@
 ; Bei neuen Versionen AppId beibehalten (sonst gilt es als anderes Programm), nur AppVersion anheben.
 
 #define AppName "FlacDup"
-#define AppVersion "1.2.0"
+#define AppVersion "1.2.1"
 #define AppPublisher "yakobo1970"
 #define AppURL "https://www.undabtanzbar.de/software/flacdup/"
 #define AppExeName "FlacDup.exe"
