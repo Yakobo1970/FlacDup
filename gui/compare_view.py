@@ -42,6 +42,7 @@ class CompareView(QWidget):
         self.env = [np.zeros(0, np.float32), np.zeros(0, np.float32)]
         self.dur = [0.0, 0.0]
         self.names = ["", ""]
+        self.name_alert = False   # Interpret/Haupttitel weichen ab -> Dateinamen rot wie in der Liste
         self.ts, self.off = 1.0, 0.0
         self.res: dict | None = None
         self.side = 0
@@ -66,7 +67,8 @@ class CompareView(QWidget):
         self.message = message
         self.update()
 
-    def set_pair(self, env_a, env_b, dur_a, dur_b, names, ts, off):
+    def set_pair(self, env_a, env_b, dur_a, dur_b, names, ts, off, alert: bool = False):
+        self.name_alert = alert
         self.env = [np.asarray(env_a, np.float32), np.asarray(env_b, np.float32)]
         self.dur = [dur_a or 0.0, dur_b or 0.0]
         self.names = names
@@ -197,6 +199,10 @@ class CompareView(QWidget):
             h = max(1.0, amp * half)
             p.drawLine(QPointF(x, mid - h), QPointF(x, mid + h))
         # Dateiname oben links in der Spur -- auf dunklem Schild, damit er auf jeder Wellenfarbe lesbar ist
+        if self.name_alert:
+            f = p.font()
+            f.setBold(True)
+            p.setFont(f)
         fm = p.fontMetrics()
         name = fm.elidedText(self.names[side], Qt.ElideMiddle, int(r.width() - 24))
         box = QRectF(r.left() + 4, r.top() + 2, fm.horizontalAdvance(name) + 12, fm.height() + 4)
@@ -204,8 +210,12 @@ class CompareView(QWidget):
         p.setBrush(QColor(20, 22, 26, 205))
         p.drawRoundedRect(box, 4, 4)
         p.setBrush(Qt.NoBrush)
-        p.setPen(QColor(235, 235, 235))
+        p.setPen(theme.MISMATCH_TEXT if self.name_alert else QColor(235, 235, 235))
         p.drawText(box, Qt.AlignCenter, name)
+        if self.name_alert:
+            f = p.font()
+            f.setBold(False)
+            p.setFont(f)
 
     def _draw_rulers(self, p: QPainter, lanes):
         p.setPen(QColor(150, 150, 150))

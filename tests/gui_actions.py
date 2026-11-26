@@ -1,5 +1,5 @@
 """Aktionen im Hauptfenster samt Rueckgaengig an einer Test-DB pruefen (offscreen):
-Kein Duplikat, Tags/Name im Editor, Schneiden + Neubewertung, Papierkorb -- jeweils mit Strg+Z.
+Kein Duplikat, Tags/Name im Editor, Schneiden + Neubewertung, Papierkorb, Tag-Abgleich -- jeweils mit Strg+Z.
 
 ACHTUNG: schreibt in die Dateien der DB (Papierkorb, Schnitt, Tags). Nur mit einer DB aufrufen,
 deren Dateien Kopien in einem Testordner sind (z. B. per tests/cli_run.py aus Kopien gebaut).
@@ -136,6 +136,49 @@ def main():
           and not any("(Teil" in n for n in names), ", ".join(names))
     check("Rückgängig: altes Paar zurück", any(r["id"] == pid0 for r in w.model.rows)
           and (w.current or {}).get("id") == pid0)
+
+    # 6) Tag-Abgleich per Rechtsklick in die Liste + Rueckgaengig
+    from PySide6.QtWidgets import QDialog
+    from engine import tagsync
+    from gui.pair_model import mismatch
+    from gui.tag_dialog import TagCompareDialog
+    select_first()
+    fa, fb = w.model.files[w.current["a_id"]], w.model.files[w.current["b_id"]]
+    check("Welle: Namen rot genau bei Abweichung", w.view.name_alert == any(mismatch(fa, fb)))
+    pa, pb = fa["path"], fb["path"]
+    before = [tagsync.read(pa), tagsync.read(pb)]
+
+    def fake_exec(dlg):
+        dlg._set_text(dlg.fields[0]["title"], "Abgleich-Titel")
+        dlg._copy("title", 0)
+        dlg._set_text(dlg.fields[0]["composer"], "Martin L. Gore")
+        dlg._set_text(dlg.fields[1]["lyrics"], "Zeile eins\nZeile zwei")
+        dlg._copy("cover", 0)
+        dlg.stems[1].setText("abgleich-b")
+        dlg._update()
+        return QDialog.Accepted
+    TagCompareDialog.exec = fake_exec
+    w._tag_compare_at(w.table.visualRect(w.proxy.index(0, 0)).center())
+    pump(app, 0.3)
+    new_b = os.path.join(os.path.dirname(pb), "abgleich-b" + os.path.splitext(pb)[1])
+    ra, rb = tagsync.read(pa), tagsync.read(new_b) if os.path.exists(new_b) else None
+    check("Tag-Abgleich: B umbenannt", os.path.exists(new_b) and not os.path.exists(pb))
+    check("Tag-Abgleich: Titel A und B", ra["values"]["title"] == "Abgleich-Titel"
+          and rb is not None and rb["values"]["title"] == "Abgleich-Titel")
+    check("Tag-Abgleich: Komponist A, Liedtext B", ra["values"]["composer"] == "Martin L. Gore"
+          and rb["values"]["lyrics"] == "Zeile eins\nZeile zwei")
+    check("Tag-Abgleich: Cover von A in B", tagsync.same_cover(rb["cover"], before[0]["cover"]))
+    check("Tag-Abgleich: Paar bleibt, Modell aktuell", (w.current or {}).get("id") is not None
+          and w.model.files[w.current["b_id"]]["path"] == new_b
+          and w.model.files[w.current["a_id"]]["title"] == "Abgleich-Titel")
+    w._do_undo()
+    pump(app, 0.3)
+    after = [tagsync.read(pa), tagsync.read(pb) if os.path.exists(pb) else None]
+    check("Rückgängig: B wieder alter Name", os.path.exists(pb) and not os.path.exists(new_b))
+    check("Rückgängig: Tags + Cover wie vorher", after[1] is not None and all(
+        after[i]["values"] == before[i]["values"] and tagsync.same_cover(after[i]["cover"], before[i]["cover"])
+        for i in (0, 1)))
+    check("Rückgängig: Modell wieder alter Pfad", any(f["path"] == pb for f in w.model.files.values()))
     w.close()
     print("ALLES OK" if not FAILS else f"{len(FAILS)} FEHLER: {FAILS}")
     sys.exit(1 if FAILS else 0)

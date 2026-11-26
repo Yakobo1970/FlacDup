@@ -209,6 +209,9 @@ der Anteil der kürzeren Datei. Mit der Maus über einer Welle steht der genaue 
 <li><b>N</b> Kein Duplikat · <b>Strg+Z</b> Rückgängig</li>
 <li>Mausrad in der Welle = Zoom, Ziehen = verschieben, Doppelklick = alles zeigen</li>
 <li><b>Rechtsklick</b> in eine Welle öffnet den Editor für diese Datei</li>
+<li><b>Rechtsklick</b> in die Liste öffnet den <b>Tag-Abgleich A/B</b>: alle Tags beider Dateien nebeneinander
+(Cover, Titel, Interpret, Album, Jahr, Original-Jahr, Genre, Komponist, Kommentar, Liedtext, Dateiname); abweichende Felder
+stehen rot, → und ← übernehmen ein Feld auf die andere Seite</li>
 </ul>
 
 <h3>Weitere Tipps</h3>
@@ -274,6 +277,9 @@ excerpt the share of the shorter file. Hover over a waveform to see the exact va
 <li><b>N</b> not a duplicate · <b>Ctrl+Z</b> undo</li>
 <li>Mouse wheel in the waveform = zoom, drag = scroll, double-click = show all</li>
 <li><b>Right-click</b> in a waveform opens the editor for that file</li>
+<li><b>Right-click</b> in the list opens the <b>tag comparison A/B</b>: all tags of both files side by side
+(cover, title, artist, album, year, original year, genre, composer, comment, lyrics, file name); differing fields are red,
+→ and ← copy a field to the other side</li>
 </ul>
 
 <h3>More tips</h3>
@@ -337,6 +343,9 @@ pour un extrait, la part du fichier le plus court. Survoler une forme d’onde a
 <li><b>N</b> pas un doublon · <b>Ctrl+Z</b> annuler</li>
 <li>Molette dans la forme d’onde = zoom, glisser = défiler, double-clic = tout afficher</li>
 <li><b>Clic droit</b> dans une forme d’onde ouvre l’éditeur pour ce fichier</li>
+<li><b>Clic droit</b> dans la liste ouvre la <b>comparaison des tags A/B</b> : tous les tags des deux fichiers
+côte à côte (pochette, titre, artiste, album, année, année d’origine, genre, compositeur, commentaire, paroles, nom de fichier) ;
+les champs différents sont en rouge, → et ← recopient un champ de l’autre côté</li>
 </ul>
 
 <h3>Autres conseils</h3>

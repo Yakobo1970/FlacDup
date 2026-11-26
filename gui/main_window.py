@@ -11,12 +11,12 @@ from pathlib import Path
 
 from PySide6.QtCore import QObject, Qt, QTimer, Signal
 from PySide6.QtGui import QAction, QKeySequence, QShortcut
-from PySide6.QtWidgets import (QAbstractItemView, QCheckBox, QComboBox, QFileDialog, QGridLayout, QHBoxLayout,
+from PySide6.QtWidgets import (QAbstractItemView, QCheckBox, QComboBox, QDialog, QFileDialog, QGridLayout, QHBoxLayout,
                                QHeaderView, QLabel, QLineEdit, QMainWindow, QMessageBox, QProgressBar,
                                QPushButton, QSizePolicy, QSplitter, QTableView, QVBoxLayout, QWidget)
 from send2trash import send2trash
 
-from engine import compare, editing, recycle
+from engine import compare, editing, recycle, tagsync
 from engine.cover import cover_bytes
 from engine.db import Database
 from engine.decode import AUDIO_EXTENSIONS, probe
@@ -29,7 +29,7 @@ from . import theme
 from .ab_player import ABPlayer
 from .check_combo import CheckCombo
 from .compare_view import CompareView, fmt_time
-from .pair_model import COL_BAND, PAIR_ROLE, MismatchDelegate, PairFilter, PairModel
+from .pair_model import COL_BAND, PAIR_ROLE, MismatchDelegate, PairFilter, PairModel, mismatch
 from .widgets import BLUE_BUTTON, GREEN_BUTTON, TrashButton
 
 APP_DATA_DIR = Path(os.environ.get("LOCALAPPDATA", Path.home())) / APP_NAME
@@ -245,6 +245,8 @@ class MainWindow(QMainWindow):
             self.table.setColumnWidth(col, w)
         self.table.sortByColumn(COL_BAND, Qt.AscendingOrder)
         self.table.selectionModel().currentRowChanged.connect(self._on_row)
+        self.table.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.table.customContextMenuRequested.connect(self._tag_compare_at)
 
         detail = QWidget()
         dl = QVBoxLayout(detail)
@@ -629,7 +631,7 @@ class MainWindow(QMainWindow):
         prev_a = np.frombuffer(self.db.preview(a["id"]) or b"", np.uint8) / 255.0
         prev_b = np.frombuffer(self.db.preview(b["id"]) or b"", np.uint8) / 255.0
         self.view.set_pair(prev_a, prev_b, a["duration"], b["duration"],
-                           [a["filename"], b["filename"]], p["time_scale"], p["offset_s"])
+                           [a["filename"], b["filename"]], p["time_scale"], p["offset_s"], any(mismatch(a, b)))
         res = self._load_compare(p)
         self._cur_cmp = res is not None
         self.view.set_compare(res)
@@ -1015,6 +1017,76 @@ class MainWindow(QMainWindow):
             self.reload(keep_pair=ctx["pair"])
         self._push_undo(T("Tags/Name: {name}", name=os.path.basename(new)), undo)
         self.lbl_status.setText(T("Gespeichert: {name}", name=os.path.basename(new)))
+
+    def _tag_compare_at(self, pos):
+        """Rechtsklick in die Liste: Tag-Abgleich A/B (alle Tags, Cover, Komponist, Liedtext, Dateiname)."""
+        idx = self.table.indexAt(pos)
+        if not idx.isValid() or self._reeval_busy:
+            return
+        self.table.selectRow(idx.row())
+        if self.current is None:
+            return
+        from .tag_dialog import TagCompareDialog
+        pid = self.current["id"]
+        files = [self.model.files[self.current["a_id"]], self.model.files[self.current["b_id"]]]
+        for f in files:
+            if not os.path.exists(f["path"]):
+                QMessageBox.warning(self, APP_NAME, T("Datei nicht gefunden:\n{path}", path=f["path"]))
+                return
+        self.player.stop()
+        self.player.wait_idle()
+        try:
+            dlg = TagCompareDialog(files[0]["path"], files[1]["path"], self)
+        except Exception as exc:
+            log_error("Tag-Abgleich", exc)
+            QMessageBox.warning(self, APP_NAME, T("Tags konnten nicht gelesen werden:\n{err}", err=exc))
+            return
+        if dlg.exec() != QDialog.Accepted:
+            return
+        changes = dlg.changes()
+        done = []        # (fid, alter Pfad, neuer Pfad, Tag-Schnappschuss, DB-Schnappschuss)
+        try:
+            for side, ch in sorted(changes.items()):
+                f = files[side]
+                old = f["path"]
+                snap, dbsnap = tagsync.snapshot(old), self.db.snapshot_file(f["id"])
+                tagsync.write(old, ch["values"], ch["cover"])
+                new = old
+                done.append([f["id"], old, new, snap, dbsnap])
+                if ch["stem"]:
+                    new = os.path.join(os.path.dirname(old), ch["stem"] + os.path.splitext(old)[1])
+                    if os.path.normcase(new) != os.path.normcase(old) and os.path.exists(new):
+                        raise RuntimeError(T("Datei gibt es schon:\n{path}", path=new))
+                    move_file(old, new)
+                    done[-1][2] = new
+                st = os.stat(new)
+                self.db.update_file_meta(f["id"], new, st.st_size, st.st_mtime, read_tags(new))
+        except Exception as exc:
+            log_error("Tag-Abgleich speichern", exc)
+            QMessageBox.warning(self, APP_NAME, T("Konnte nicht gespeichert werden:\n{err}", err=exc))
+        for _fid, old, new, _s, _d in done:
+            self._covers.pop(old, None)
+            self._covers.pop(new, None)
+        self.current = None
+        self.reload(keep_pair=pid)
+        if not done:
+            return
+
+        def undo():
+            for fid, old, new, snap, dbsnap in reversed(done):
+                if os.path.normcase(new) != os.path.normcase(old):
+                    move_file(new, old)
+                tagsync.restore(snap, old)
+                self.db.restore_snapshot(dbsnap)
+                st = os.stat(old)
+                self.db.update_file_meta(fid, old, st.st_size, st.st_mtime, read_tags(old))
+                self._covers.pop(old, None)
+                self._covers.pop(new, None)
+            self.current = None
+            self.reload(keep_pair=pid)
+        names = " / ".join(os.path.basename(d[2]) for d in done)
+        self._push_undo(T("Tag-Abgleich: {name}", name=names), undo)
+        self.lbl_status.setText(T("Tags gespeichert: {name}", name=names))
 
     def _open_dir(self, side: int):
         if self.current is None:

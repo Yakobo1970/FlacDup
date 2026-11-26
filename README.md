@@ -44,6 +44,13 @@ in Spalten: Pfad mit Anzahl der Dateien im Ordner, Länge, Abtastrate, Bitrate, 
 Formaten), Kanäle und den gleich klingenden Anteil. Links neben jeder Welle liegt ihr Papierkorb-Knopf mit
 dem Coverbild der Datei (eingebettet oder Ordnerbild); beim Darüberfahren wird die betroffene Welle rot markiert.
 
+**Tag-Abgleich:** Rechtsklick in die Liste öffnet ein Fenster mit allen Tags von A und B nebeneinander –
+Cover (mit Größe und Format), Titel, Interpret, Album, Album-Interpret, Track, CD, Jahr, Original-Jahr, Genre, Komponist,
+Kommentar, Liedtext und Dateiname. Abweichende Felder stehen rot, → und ← übernehmen ein Feld auf die
+andere Seite, „Leere Felder ergänzen“ füllt Lücken gegenseitig auf. Gespeichert wird nur, was sich geändert
+hat (MP3/WAV/AIFF, FLAC/OGG, M4A; WMA ohne Cover) – mit Strg+Z rückgängig. Weichen Interpret oder
+Haupttitel ab, stehen auch die Dateinamen über den Wellen rot.
+
 **Bearbeiten:** Rechtsklick in eine Welle öffnet den Editor für diese Datei: Anfang/Ende kürzen,
 Bereiche entfernen, in mehrere Teile zerlegen, Tags und Dateinamen ändern. MP3 wird ohne Neukodierung
 geschnitten (Frame-genau, ~26 ms), FLAC/WAV/AIFF sample-genau und verlustfrei. Die abweichenden
